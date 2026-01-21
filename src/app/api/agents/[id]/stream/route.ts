@@ -46,8 +46,11 @@ export async function POST(
         try {
           const result = await runAgent(agent, session.id, prompt, sendMessage);
 
-          // Send final result
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', result })}\n\n`));
+          // Get output files for this session
+          const outputFiles = agentStore.getOutputFiles(session.id);
+
+          // Send final result with output files
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', result, outputFiles })}\n\n`));
         } catch (error) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: error instanceof Error ? error.message : 'Unknown error' })}\n\n`));
         } finally {

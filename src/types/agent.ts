@@ -9,9 +9,31 @@ export type ToolName =
   | 'Grep'
   | 'WebSearch'
   | 'WebFetch'
-  | 'Task';
+  | 'Task'
+  | 'NotebookEdit';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+
+export type OutputFileType = 'text' | 'markdown' | 'json' | 'csv' | 'image' | 'pdf' | 'other';
+
+export interface OutputFile {
+  id: string;
+  sessionId: string;
+  filename: string;
+  path: string;
+  type: OutputFileType;
+  mimeType: string;
+  size: number;
+  content?: string;
+  url?: string;
+  createdAt: Date;
+}
+
+export interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
 
 export interface AgentConfig {
   id: string;
@@ -22,6 +44,9 @@ export interface AgentConfig {
   maxTurns?: number;
   systemPrompt?: string;
   cwd?: string;
+  outputDir?: string;
+  mcpServers?: Record<string, McpServerConfig>;
+  enableReplicate?: boolean;
 }
 
 export interface AgentMessage {
@@ -41,6 +66,7 @@ export interface AgentSession {
   sessionId?: string;
   status: AgentStatus;
   messages: AgentMessage[];
+  outputFiles: OutputFile[];
   createdAt: Date;
   updatedAt: Date;
   result?: AgentResult;

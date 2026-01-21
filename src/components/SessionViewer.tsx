@@ -2,6 +2,7 @@
 
 import { AgentSession, AgentConfig } from '@/types/agent';
 import { MessageList } from './MessageList';
+import { OutputViewer } from './OutputViewer';
 
 interface SessionViewerProps {
   session: AgentSession;
@@ -107,6 +108,13 @@ export function SessionViewer({ session, agent, onClose }: SessionViewerProps) {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Output Files */}
+        {session.outputFiles && session.outputFiles.length > 0 && (
+          <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
+            <OutputViewer files={session.outputFiles} />
           </div>
         )}
 

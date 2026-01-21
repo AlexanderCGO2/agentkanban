@@ -1,4 +1,4 @@
-import { AgentConfig, AgentSession, AgentMessage, AgentResult, AgentStatus } from '@/types/agent';
+import { AgentConfig, AgentSession, AgentMessage, AgentResult, AgentStatus, OutputFile } from '@/types/agent';
 import { v4 as uuidv4 } from 'uuid';
 
 // In-memory store for agents and sessions
@@ -52,6 +52,7 @@ class AgentStore {
       agentId,
       status: 'idle',
       messages: [],
+      outputFiles: [],
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -116,6 +117,26 @@ class AgentStore {
       session.status = result.success ? 'completed' : 'error';
       session.updatedAt = new Date();
     }
+  }
+
+  addOutputFile(sessionId: string, file: Omit<OutputFile, 'id' | 'sessionId' | 'createdAt'>): OutputFile {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`Session ${sessionId} not found`);
+
+    const outputFile: OutputFile = {
+      ...file,
+      id: uuidv4(),
+      sessionId,
+      createdAt: new Date(),
+    };
+    session.outputFiles.push(outputFile);
+    session.updatedAt = new Date();
+    return outputFile;
+  }
+
+  getOutputFiles(sessionId: string): OutputFile[] {
+    const session = this.sessions.get(sessionId);
+    return session?.outputFiles || [];
   }
 
   deleteSession(id: string): boolean {

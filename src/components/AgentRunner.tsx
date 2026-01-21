@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { AgentConfig, AgentMessage, AgentResult } from '@/types/agent';
+import { AgentConfig, AgentMessage, AgentResult, OutputFile } from '@/types/agent';
 import { MessageList } from './MessageList';
+import { OutputViewer } from './OutputViewer';
 
 interface AgentRunnerProps {
   agent: AgentConfig;
@@ -11,6 +12,7 @@ interface AgentRunnerProps {
   running: boolean;
   error: string | null;
   sessionId: string | null;
+  outputFiles: OutputFile[];
   onRun: (prompt: string) => void;
   onClose: () => void;
 }
@@ -22,6 +24,7 @@ export function AgentRunner({
   running,
   error,
   sessionId,
+  outputFiles,
   onRun,
   onClose,
 }: AgentRunnerProps) {
@@ -134,6 +137,12 @@ export function AgentRunner({
                   Tokens: {result.usage.inputTokens.toLocaleString()} in / {result.usage.outputTokens.toLocaleString()} out
                 </div>
               )}
+            </div>
+          )}
+
+          {outputFiles.length > 0 && (
+            <div className="mt-4">
+              <OutputViewer files={outputFiles} />
             </div>
           )}
         </div>

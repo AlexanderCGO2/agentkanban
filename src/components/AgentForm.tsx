@@ -1,11 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { CreateAgentRequest, ToolName, PermissionMode } from '@/types/agent';
+import { ToolName, PermissionMode } from '@/types/agent';
 
 const AVAILABLE_TOOLS: ToolName[] = [
-  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task'
+  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'NotebookEdit'
 ];
+
+interface CreateAgentRequest {
+  name: string;
+  prompt: string;
+  allowedTools: ToolName[];
+  permissionMode: PermissionMode;
+  maxTurns?: number;
+  systemPrompt?: string;
+  enableReplicate?: boolean;
+}
 
 const PERMISSION_MODES: { value: PermissionMode; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'Standard permission behavior with prompts' },
@@ -23,10 +33,11 @@ interface AgentFormProps {
 export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [allowedTools, setAllowedTools] = useState<ToolName[]>(['Read', 'Glob', 'Grep']);
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [allowedTools, setAllowedTools] = useState<ToolName[]>(['Read', 'Write', 'Glob', 'Grep']);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('acceptEdits');
   const [maxTurns, setMaxTurns] = useState<number | undefined>();
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [enableReplicate, setEnableReplicate] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,14 +74,16 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
         permissionMode,
         maxTurns: maxTurns || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
+        enableReplicate,
       });
       // Reset form on success
       setName('');
       setPrompt('');
-      setAllowedTools(['Read', 'Glob', 'Grep']);
-      setPermissionMode('default');
+      setAllowedTools(['Read', 'Write', 'Glob', 'Grep']);
+      setPermissionMode('acceptEdits');
       setMaxTurns(undefined);
       setSystemPrompt('');
+      setEnableReplicate(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent');
     }
@@ -155,6 +168,37 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Integrations */}
+      <div>
+        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+          Integrations
+        </label>
+        <div className="space-y-2">
+          <label className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 cursor-pointer transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-600">
+            <input
+              type="checkbox"
+              checked={enableReplicate}
+              onChange={(e) => setEnableReplicate(e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700"
+            />
+            <div className="flex-1">
+              <div className="font-medium text-zinc-900 dark:text-white flex items-center gap-2">
+                Replicate AI
+                <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                  Image Generation
+                </span>
+              </div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                Enable image generation using Flux, SDXL, and other models via Replicate
+              </div>
+            </div>
+          </label>
+        </div>
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          Requires REPLICATE_API_TOKEN environment variable
+        </p>
       </div>
 
       <div>

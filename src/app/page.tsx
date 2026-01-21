@@ -20,7 +20,7 @@ export default function Home() {
 
   const { agents, loading: agentsLoading, createAgent, deleteAgent } = useAgents();
   const { sessions, loading: sessionsLoading, fetchSessions, deleteSession } = useSessions();
-  const { running, messages, result, sessionId, error, runAgent, reset } = useAgentRunner();
+  const { running, messages, result, sessionId, outputFiles, error, runAgent, reset } = useAgentRunner();
 
   const handleCreateAgent = async (config: Parameters<typeof createAgent>[0]) => {
     setCreateLoading(true);
@@ -216,6 +216,7 @@ export default function Home() {
           running={running}
           error={error}
           sessionId={sessionId}
+          outputFiles={outputFiles}
           onRun={(prompt) => runAgent(selectedAgent.id, prompt)}
           onClose={handleCloseRunner}
         />

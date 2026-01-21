@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { AgentConfig, AgentSession, CreateAgentRequest, AgentMessage, AgentResult } from '@/types/agent';
+import { AgentConfig, AgentSession, CreateAgentRequest, AgentMessage, AgentResult, OutputFile } from '@/types/agent';
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -89,6 +89,7 @@ export function useAgentRunner() {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [result, setResult] = useState<AgentResult | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [outputFiles, setOutputFiles] = useState<OutputFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const runAgent = useCallback(async (agentId: string, prompt: string) => {
@@ -97,6 +98,7 @@ export function useAgentRunner() {
     setResult(null);
     setError(null);
     setSessionId(null);
+    setOutputFiles([]);
 
     try {
       const response = await fetch(`/api/agents/${agentId}/stream`, {
@@ -133,6 +135,12 @@ export function useAgentRunner() {
                 setSessionId(data.sessionId);
               } else if (data.type === 'complete') {
                 setResult(data.result);
+                // Fetch final output files when complete
+                if (data.outputFiles) {
+                  setOutputFiles(data.outputFiles);
+                }
+              } else if (data.type === 'output_file') {
+                setOutputFiles(prev => [...prev, data.file]);
               } else if (data.type === 'error') {
                 setError(data.error);
               } else if (data.id) {
@@ -156,8 +164,9 @@ export function useAgentRunner() {
     setMessages([]);
     setResult(null);
     setSessionId(null);
+    setOutputFiles([]);
     setError(null);
   }, []);
 
-  return { running, messages, result, sessionId, error, runAgent, reset };
+  return { running, messages, result, sessionId, outputFiles, error, runAgent, reset };
 }
