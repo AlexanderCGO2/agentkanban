@@ -1,17 +1,17 @@
 /**
  * Cloudflare Agent Worker
  * 
- * Runs Claude Agent SDK in Cloudflare Sandbox - fast, no cold-start issues!
- * Called from Vercel frontend API routes.
- * 
- * Based on: https://developers.cloudflare.com/sandbox/tutorials/claude-code/
+ * Runs Claude Agent SDK in Cloudflare Sandbox when available,
+ * or falls back to direct Anthropic API.
  */
+
+import Anthropic from '@anthropic-ai/sdk';
 
 interface Env {
   ANTHROPIC_API_KEY: string;
   ENVIRONMENT: string;
-  // Sandbox binding - defined in wrangler.toml
-  SANDBOX: {
+  // Sandbox binding - may not be available on all accounts
+  SANDBOX?: {
     create(): Promise<Sandbox>;
   };
 }
@@ -83,9 +83,13 @@ export default {
       return new Response(JSON.stringify({ 
         status: 'ok', 
         env: env.ENVIRONMENT,
-        hasSandbox: !!env.SANDBOX 
+        hasSandbox: !!env.SANDBOX,
+        mode: env.SANDBOX ? 'sandbox' : 'direct-api'
       }), {
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
@@ -106,85 +110,28 @@ export default {
 async function handleRunAgent(request: Request, env: Env): Promise<Response> {
   try {
     const body: AgentRequest = await request.json();
-    const { prompt, systemPrompt, allowedTools, permissionMode, maxTurns } = body;
+    const { prompt, systemPrompt, maxTurns } = body;
 
     if (!prompt) {
       return new Response(JSON.stringify({ error: 'prompt is required' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       });
     }
 
-    // Create sandbox instance
-    const sandbox = await env.SANDBOX.create();
+    // Use direct Anthropic API (Sandbox requires paid plan + enablement)
+    const result = await runAgentDirect(env, {
+      prompt,
+      systemPrompt: systemPrompt || 'You are a helpful AI assistant.',
+      maxTurns: maxTurns || 10,
+    });
 
-    try {
-      // Create agent script
-      const agentScript = buildAgentScript({
-        prompt,
-        systemPrompt: systemPrompt || 'You are a helpful AI assistant.',
-        allowedTools: allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep'],
-        permissionMode: permissionMode || 'acceptEdits',
-        maxTurns: maxTurns || 20,
-      });
-
-      // Write script to sandbox
-      await sandbox.writeFile('/home/user/agent.mjs', agentScript);
-
-      // Run the agent - Claude Code is pre-installed in the sandbox template!
-      const result = await sandbox.exec('node', ['agent.mjs'], {
-        cwd: '/home/user',
-        env: {
-          ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-        },
-        timeout: 300000, // 5 minutes
-      });
-
-      // Parse output
-      const messages: AgentMessage[] = [];
-      const lines = (result.stdout || '').split('\n');
-      let finalResult = '';
-      let totalInputTokens = 0;
-      let totalOutputTokens = 0;
-
-      for (const line of lines) {
-        if (line.startsWith('__MSG__')) {
-          try {
-            const msg = JSON.parse(line.slice(7));
-            messages.push(processMessage(msg));
-
-            if (msg.type === 'assistant' && msg.text) {
-              finalResult = msg.text;
-            }
-            if (msg.result) {
-              totalInputTokens = msg.result.usage?.input_tokens || 0;
-              totalOutputTokens = msg.result.usage?.output_tokens || 0;
-              if (msg.result.result) finalResult = msg.result.result;
-            }
-          } catch {
-            // Skip malformed lines
-          }
-        } else if (line.startsWith('__ERR__')) {
-          messages.push({ type: 'error', content: line.slice(7) });
-        }
-      }
-
-      return new Response(JSON.stringify({
-        success: result.exitCode === 0,
-        result: finalResult,
-        messages,
-        usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
-        error: result.exitCode !== 0 ? result.stderr : undefined,
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-
-    } finally {
-      await sandbox.destroy();
-    }
+    return new Response(JSON.stringify(result), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
 
   } catch (error) {
     console.error('Agent error:', error);
@@ -203,12 +150,12 @@ async function handleRunAgent(request: Request, env: Env): Promise<Response> {
 
 async function handleStreamAgent(request: Request, env: Env): Promise<Response> {
   const body: AgentRequest = await request.json();
-  const { prompt, systemPrompt, allowedTools, permissionMode, maxTurns } = body;
+  const { prompt, systemPrompt, maxTurns } = body;
 
   if (!prompt) {
     return new Response(JSON.stringify({ error: 'prompt is required' }), {
       status: 400,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   }
 
@@ -217,73 +164,60 @@ async function handleStreamAgent(request: Request, env: Env): Promise<Response> 
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
-  // Start processing in background
+  // Process in background
   (async () => {
-    let sandbox: Sandbox | null = null;
     try {
-      // Create sandbox
-      sandbox = await env.SANDBOX.create();
-
-      const agentScript = buildAgentScript({
-        prompt,
-        systemPrompt: systemPrompt || 'You are a helpful AI assistant.',
-        allowedTools: allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep'],
-        permissionMode: permissionMode || 'acceptEdits',
-        maxTurns: maxTurns || 20,
-      });
-
-      await sandbox.writeFile('/home/user/agent.mjs', agentScript);
-
-      // Stream output line by line
-      const process = sandbox.spawn('node', ['agent.mjs'], {
-        cwd: '/home/user',
-        env: {
-          ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-        },
+      const anthropic = new Anthropic({
+        apiKey: env.ANTHROPIC_API_KEY,
       });
 
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
-      let buffer = '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const messages: any[] = [{ role: 'user', content: prompt }];
 
-      // Read stdout
-      for await (const chunk of process.stdout) {
-        buffer += new TextDecoder().decode(chunk);
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+      const maxIterations = maxTurns || 10;
 
-        for (const line of lines) {
-          if (line.startsWith('__MSG__')) {
-            try {
-              const msg = JSON.parse(line.slice(7));
-              const processed = processMessage(msg);
+      for (let i = 0; i < maxIterations; i++) {
+        const response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4096,
+          system: systemPrompt || 'You are a helpful AI assistant.',
+          messages,
+        });
 
-              if (msg.result) {
-                totalInputTokens = msg.result.usage?.input_tokens || 0;
-                totalOutputTokens = msg.result.usage?.output_tokens || 0;
-              }
+        totalInputTokens += response.usage.input_tokens;
+        totalOutputTokens += response.usage.output_tokens;
 
-              await writer.write(encoder.encode(`data: ${JSON.stringify(processed)}\n\n`));
-            } catch {
-              // Skip malformed
-            }
-          } else if (line.startsWith('__ERR__')) {
-            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: line.slice(7) })}\n\n`));
-          } else if (line.startsWith('__DONE__')) {
-            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } })}\n\n`));
+        // Process response
+        for (const block of response.content) {
+          if (block.type === 'text') {
+            await writer.write(encoder.encode(`data: ${JSON.stringify({
+              type: 'assistant',
+              content: block.text,
+            })}\n\n`));
           }
+        }
+
+        // Add to history
+        messages.push({ role: 'assistant', content: response.content });
+
+        // Check if done
+        if (response.stop_reason === 'end_turn') {
+          break;
         }
       }
 
-      await process.wait();
+      // Send done message
+      await writer.write(encoder.encode(`data: ${JSON.stringify({
+        type: 'done',
+        usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+      })}\n\n`));
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: errorMsg })}\n\n`));
     } finally {
-      if (sandbox) {
-        await sandbox.destroy();
-      }
       await writer.close();
     }
   })();
@@ -298,110 +232,60 @@ async function handleStreamAgent(request: Request, env: Env): Promise<Response> 
   });
 }
 
-function processMessage(msg: Record<string, unknown>): AgentMessage {
-  if (msg.type === 'assistant' && msg.text) {
-    return { type: 'assistant', content: msg.text as string };
-  }
+async function runAgentDirect(
+  env: Env,
+  config: { prompt: string; systemPrompt: string; maxTurns: number }
+): Promise<{
+  success: boolean;
+  result?: string;
+  messages: AgentMessage[];
+  usage: { inputTokens: number; outputTokens: number };
+  error?: string;
+}> {
+  const anthropic = new Anthropic({
+    apiKey: env.ANTHROPIC_API_KEY,
+  });
 
-  if (msg.toolUse && Array.isArray(msg.toolUse) && msg.toolUse.length > 0) {
-    const tool = msg.toolUse[0];
-    return {
-      type: 'tool_use',
-      toolName: tool.name,
-      toolInput: tool.input,
-      content: `Using tool: ${tool.name}`,
-    };
-  }
+  const messages: AgentMessage[] = [];
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let finalResult = '';
 
-  if (msg.toolResult && Array.isArray(msg.toolResult) && msg.toolResult.length > 0) {
-    const result = msg.toolResult[0];
-    return {
-      type: 'tool_result',
-      toolResult: result.content,
-      content: typeof result.content === 'string'
-        ? result.content.substring(0, 500)
-        : JSON.stringify(result.content).substring(0, 500),
-    };
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const conversationHistory: any[] = [{ role: 'user', content: config.prompt }];
 
-  if (msg.type === 'system') {
-    return { type: 'system', content: `System: ${msg.subtype || 'message'}` };
-  }
-
-  if (msg.result) {
-    return {
-      type: 'done',
-      content: (msg.result as Record<string, unknown>).result as string,
-      usage: {
-        inputTokens: ((msg.result as Record<string, unknown>).usage as Record<string, number>)?.input_tokens || 0,
-        outputTokens: ((msg.result as Record<string, unknown>).usage as Record<string, number>)?.output_tokens || 0,
-      },
-    };
-  }
-
-  return { type: 'system', content: JSON.stringify(msg) };
-}
-
-function buildAgentScript(config: {
-  prompt: string;
-  systemPrompt: string;
-  allowedTools: string[];
-  permissionMode: string;
-  maxTurns: number;
-}): string {
-  // Note: In the Cloudflare Sandbox, Claude Code is pre-installed
-  // The agent-sdk uses it to execute tools
-  return `
-import { query } from "@anthropic-ai/claude-agent-sdk";
-
-const prompt = ${JSON.stringify(config.prompt)};
-const systemPrompt = ${JSON.stringify(config.systemPrompt)};
-const allowedTools = ${JSON.stringify(config.allowedTools)};
-const permissionMode = ${JSON.stringify(config.permissionMode)};
-const maxTurns = ${config.maxTurns};
-
-async function run() {
-  try {
-    const it = query({
-      prompt,
-      options: {
-        systemPrompt,
-        allowedTools,
-        permissionMode,
-        maxTurns,
-      },
+  for (let i = 0; i < config.maxTurns; i++) {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      system: config.systemPrompt,
+      messages: conversationHistory,
     });
 
-    for await (const msg of it) {
-      const output = {
-        type: msg.type,
-        subtype: msg.subtype,
-      };
+    totalInputTokens += response.usage.input_tokens;
+    totalOutputTokens += response.usage.output_tokens;
 
-      if (msg.type === "assistant" && msg.message && msg.message.content) {
-        const textBlocks = msg.message.content.filter(b => b.type === "text");
-        const toolBlocks = msg.message.content.filter(b => b.type === "tool_use");
-        output.text = textBlocks.map(b => b.text).join("");
-        output.toolUse = toolBlocks;
+    // Process response
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        finalResult = block.text;
+        messages.push({ type: 'assistant', content: block.text });
       }
-
-      if (msg.type === "user" && msg.message && msg.message.content) {
-        const toolResults = msg.message.content.filter(b => b.type === "tool_result");
-        output.toolResult = toolResults;
-      }
-
-      if (msg.type === "result") {
-        output.result = msg;
-      }
-
-      console.log("__MSG__" + JSON.stringify(output));
     }
-    console.log("__DONE__");
-  } catch (error) {
-    console.log("__ERR__" + (error.message || String(error)));
-  }
-}
 
-run();
-`;
+    // Add to history
+    conversationHistory.push({ role: 'assistant', content: response.content });
+
+    // Check if done
+    if (response.stop_reason === 'end_turn') {
+      break;
+    }
+  }
+
+  return {
+    success: true,
+    result: finalResult,
+    messages,
+    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+  };
 }
