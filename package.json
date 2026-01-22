@@ -9,11 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.17",
     "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.25.3",
     "@neondatabase/serverless": "^1.0.2",
-    "@vercel/sandbox": "^1.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fabric": "^7.1.0",
