@@ -1,201 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { Sandbox } from '@vercel/sandbox';
 import { AgentConfig, AgentMessage, AgentResult } from '@/types/agent';
 import { agentStore } from './agent-store';
 
 export type MessageCallback = (message: AgentMessage) => void;
 
-const anthropic = new Anthropic();
-
-// MCP Tool definitions for the Design Agent
-const MCP_TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'mindmap_create',
-    description: 'Create a new mindmap with a central topic and initial branches. Returns canvas ID and node IDs.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        name: { type: 'string', description: 'Name/title for the mindmap canvas' },
-        centralTopic: { type: 'string', description: 'The central topic/title of the mindmap' },
-        branches: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of branch labels to connect to the central topic'
-        }
-      },
-      required: ['name', 'centralTopic', 'branches']
-    }
-  },
-  {
-    name: 'mindmap_add_branch',
-    description: 'Add new branches to an existing mindmap',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'The canvas ID to add branches to' },
-        parentNodeId: { type: 'string', description: 'The parent node ID to attach branches to' },
-        branchTopics: { type: 'array', items: { type: 'string' }, description: 'Array of branch topic labels' }
-      },
-      required: ['canvasId', 'parentNodeId', 'branchTopics']
-    }
-  },
-  {
-    name: 'workflow_create',
-    description: 'Create a workflow diagram from a template',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        name: { type: 'string', description: 'Name for the workflow canvas' },
-        template: {
-          type: 'string',
-          enum: ['literature-review', 'competitive-analysis', 'user-research', 'data-analysis', 'custom'],
-          description: 'Workflow template type'
-        },
-        customSteps: { type: 'array', items: { type: 'string' }, description: 'Custom step titles (only for custom template)' }
-      },
-      required: ['name', 'template']
-    }
-  },
-  {
-    name: 'canvas_create',
-    description: 'Create a new empty canvas',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        name: { type: 'string', description: 'Name of the canvas' },
-        type: { type: 'string', enum: ['mindmap', 'workflow', 'freeform'], description: 'Type of canvas' }
-      },
-      required: ['name', 'type']
-    }
-  },
-  {
-    name: 'canvas_add_node',
-    description: 'Add a node to a canvas',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID' },
-        nodeType: {
-          type: 'string',
-          enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output'],
-          description: 'Node type'
-        },
-        label: { type: 'string', description: 'Node label/title' },
-        x: { type: 'number', description: 'X position (optional)' },
-        y: { type: 'number', description: 'Y position (optional)' }
-      },
-      required: ['canvasId', 'nodeType', 'label']
-    }
-  },
-  {
-    name: 'canvas_add_connection',
-    description: 'Connect two nodes on a canvas',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID' },
-        fromNodeId: { type: 'string', description: 'Source node ID' },
-        toNodeId: { type: 'string', description: 'Target node ID' },
-        style: { type: 'string', enum: ['solid', 'dashed', 'arrow'], description: 'Connection style' },
-        label: { type: 'string', description: 'Optional connection label' }
-      },
-      required: ['canvasId', 'fromNodeId', 'toNodeId']
-    }
-  },
-  {
-    name: 'canvas_export_svg',
-    description: 'Export a canvas as SVG',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID to export' }
-      },
-      required: ['canvasId']
-    }
-  },
-  {
-    name: 'canvas_export_json',
-    description: 'Export canvas data as JSON',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID to export' }
-      },
-      required: ['canvasId']
-    }
-  },
-  {
-    name: 'canvas_layout_auto',
-    description: 'Auto-arrange nodes on a canvas',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID' },
-        algorithm: {
-          type: 'string',
-          enum: ['horizontal', 'vertical', 'radial', 'tree', 'grid'],
-          description: 'Layout algorithm'
-        }
-      },
-      required: ['canvasId', 'algorithm']
-    }
-  },
-  {
-    name: 'canvas_list',
-    description: 'List all available canvases',
-    input_schema: {
-      type: 'object' as const,
-      properties: {}
-    }
-  },
-  {
-    name: 'canvas_get',
-    description: 'Get details of a specific canvas',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID' }
-      },
-      required: ['canvasId']
-    }
-  },
-  {
-    name: 'canvas_delete',
-    description: 'Delete a canvas',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        canvasId: { type: 'string', description: 'Canvas ID to delete' }
-      },
-      required: ['canvasId']
-    }
-  }
-];
-
-// Get MCP server URL
+// Get MCP server URL for canvas tools
 const MCP_SERVER_URL = process.env.DESIGN_MCP_URL || 'https://agentkanban.vercel.app';
-
-/**
- * Call an MCP tool via HTTP
- */
-async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
-  try {
-    const response = await fetch(`${MCP_SERVER_URL}/api/design-mcp/tools/call`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: toolName, arguments: args }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return `Error calling ${toolName}: ${error}`;
-    }
-
-    const result = await response.json();
-    return JSON.stringify(result, null, 2);
-  } catch (error) {
-    return `Error calling ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
-  }
-}
 
 /**
  * Constructs the full prompt by combining the agent's base task description
@@ -210,12 +20,16 @@ ${config.prompt}
 ${userPrompt}
 
 ## Instructions
-Complete the user request following your agent task guidelines. Use the canvas tools when appropriate to create visual artifacts.`;
+Complete the user request following your agent task guidelines.`;
   }
   
   return userPrompt;
 }
 
+/**
+ * Run agent using Vercel Sandbox with Claude Agent SDK
+ * This creates an isolated VM that can run the full agent loop
+ */
 export async function runAgent(
   config: AgentConfig,
   sessionId: string,
@@ -234,130 +48,149 @@ export async function runAgent(
   onMessage?.(userMessage);
 
   const startTime = Date.now();
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let numTurns = 0;
 
   try {
-    // Build messages array
-    const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: fullPrompt }
-    ];
+    // Create Vercel Sandbox
+    const sandbox = await Sandbox.create({
+      timeoutMs: 300000, // 5 minutes max
+    });
 
-    // Determine if this agent has MCP tools enabled
-    const hasMcpTools = config.mcpServers && Object.keys(config.mcpServers).length > 0;
-    const tools = hasMcpTools ? MCP_TOOLS : undefined;
-
-    // Agent loop - keep going while there are tool calls
-    let continueLoop = true;
-    let finalContent = '';
-
-    while (continueLoop && numTurns < (config.maxTurns || 10)) {
-      numTurns++;
-
-      // Make API call
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        system: config.systemPrompt || 'You are a helpful AI assistant.',
-        messages,
-        tools,
+    try {
+      // Install dependencies in sandbox
+      await sandbox.commands.run('npm init -y && npm install @anthropic-ai/claude-agent-sdk', {
+        timeoutMs: 120000,
       });
 
-      // Track usage
-      totalInputTokens += response.usage.input_tokens;
-      totalOutputTokens += response.usage.output_tokens;
+      // Create the agent script
+      const agentScript = `
+const { query } = require('@anthropic-ai/claude-agent-sdk');
 
-      // Process response blocks
-      const assistantContent: Anthropic.ContentBlockParam[] = [];
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      let textContent = '';
+async function runAgent() {
+  const prompt = ${JSON.stringify(fullPrompt)};
+  const systemPrompt = ${JSON.stringify(config.systemPrompt || 'You are a helpful AI assistant.')};
+  const allowedTools = ${JSON.stringify(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch'])};
+  const permissionMode = ${JSON.stringify(config.permissionMode || 'acceptEdits')};
+  const maxTurns = ${config.maxTurns || 20};
 
-      for (const block of response.content) {
-        if (block.type === 'text') {
-          textContent += block.text;
-          assistantContent.push({ type: 'text', text: block.text });
-        } else if (block.type === 'tool_use') {
-          assistantContent.push({
-            type: 'tool_use',
-            id: block.id,
-            name: block.name,
-            input: block.input as Record<string, unknown>,
-          });
+  const messages = [];
+  let result = null;
 
-          // Add tool use message
-          const toolUseMessage = await agentStore.addMessage(sessionId, {
-            type: 'tool_use',
-            content: `Using tool: ${block.name}`,
-            toolName: block.name,
-            toolInput: block.input as Record<string, unknown>,
-          });
-          onMessage?.(toolUseMessage);
+  try {
+    for await (const message of query({
+      prompt,
+      options: {
+        systemPrompt,
+        allowedTools,
+        permissionMode,
+        maxTurns,
+      },
+    })) {
+      messages.push({ type: message.type, data: message });
+      
+      // Output each message as JSON line for streaming
+      console.log('__MSG__' + JSON.stringify(message));
 
-          // Execute the tool
-          const result = await callMcpTool(block.name, block.input as Record<string, unknown>);
+      if (message.type === 'result') {
+        result = message;
+      }
+    }
+  } catch (error) {
+    console.log('__ERR__' + JSON.stringify({ error: error.message || String(error) }));
+  }
 
-          // Add tool result message
-          const toolResultMessage = await agentStore.addMessage(sessionId, {
-            type: 'tool_result',
-            content: result,
-            toolName: block.name,
-            toolResult: result,
-            parentToolUseId: block.id,
-          });
-          onMessage?.(toolResultMessage);
+  console.log('__DONE__' + JSON.stringify({ result, messageCount: messages.length }));
+}
 
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: result,
-          });
+runAgent().catch(err => {
+  console.log('__ERR__' + JSON.stringify({ error: err.message || String(err) }));
+});
+`;
+
+      // Write and run the agent script
+      await sandbox.files.write('agent.js', agentScript);
+      
+      // Set API key
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error('ANTHROPIC_API_KEY not set');
+      }
+
+      // Run the agent script and collect output
+      const execution = await sandbox.commands.run(`ANTHROPIC_API_KEY="${apiKey}" node agent.js`, {
+        timeoutMs: 240000, // 4 minutes for execution
+      });
+
+      // Process the output
+      const lines = execution.stdout.split('\n');
+      let agentResult: AgentResult | null = null;
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let numTurns = 0;
+
+      for (const line of lines) {
+        if (line.startsWith('__MSG__')) {
+          try {
+            const message = JSON.parse(line.slice(7));
+            const agentMessage = await processSDKMessage(message, sessionId, onMessage);
+            
+            // Track turns
+            if (message.type === 'assistant') {
+              numTurns++;
+            }
+            
+            // Track usage from result
+            if (message.type === 'result') {
+              totalInputTokens = message.usage?.input_tokens || 0;
+              totalOutputTokens = message.usage?.output_tokens || 0;
+            }
+          } catch (e) {
+            console.error('Failed to parse message:', line);
+          }
+        } else if (line.startsWith('__ERR__')) {
+          const error = JSON.parse(line.slice(7));
+          throw new Error(error.error);
+        } else if (line.startsWith('__DONE__')) {
+          const done = JSON.parse(line.slice(8));
+          if (done.result) {
+            agentResult = {
+              success: true,
+              result: done.result.result || '',
+              durationMs: Date.now() - startTime,
+              totalCostUsd: calculateCost(totalInputTokens, totalOutputTokens),
+              numTurns,
+              usage: {
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+              },
+            };
+          }
         }
       }
 
-      // Add text content as message if present
-      if (textContent) {
-        const assistantMessage = await agentStore.addMessage(sessionId, {
-          type: 'assistant',
-          content: textContent,
-        });
-        onMessage?.(assistantMessage);
-        finalContent = textContent;
+      // Handle stderr errors
+      if (execution.stderr && !agentResult) {
+        throw new Error(execution.stderr);
       }
 
-      // Add assistant turn to messages
-      messages.push({ role: 'assistant', content: assistantContent });
-
-      // If there were tool calls, add results and continue
-      if (toolResults.length > 0) {
-        messages.push({ role: 'user', content: toolResults });
-      } else {
-        // No tool calls, we're done
-        continueLoop = false;
+      if (!agentResult) {
+        agentResult = {
+          success: false,
+          error: 'Agent completed without result',
+          durationMs: Date.now() - startTime,
+          totalCostUsd: 0,
+          numTurns: 0,
+          usage: { inputTokens: 0, outputTokens: 0 },
+        };
       }
 
-      // Check stop reason
-      if (response.stop_reason === 'end_turn') {
-        continueLoop = false;
-      }
+      await agentStore.setSessionResult(sessionId, agentResult);
+      await agentStore.updateSessionStatus(sessionId, agentResult.success ? 'completed' : 'error');
+      return agentResult;
+
+    } finally {
+      // Always destroy the sandbox
+      await sandbox.destroy();
     }
-
-    // Create result
-    const result: AgentResult = {
-      success: true,
-      result: finalContent,
-      durationMs: Date.now() - startTime,
-      totalCostUsd: calculateCost(totalInputTokens, totalOutputTokens),
-      numTurns,
-      usage: {
-        inputTokens: totalInputTokens,
-        outputTokens: totalOutputTokens,
-      },
-    };
-
-    await agentStore.setSessionResult(sessionId, result);
-    await agentStore.updateSessionStatus(sessionId, 'completed');
-    return result;
 
   } catch (error) {
     const errorResult: AgentResult = {
@@ -365,13 +198,93 @@ export async function runAgent(
       error: error instanceof Error ? error.message : String(error),
       durationMs: Date.now() - startTime,
       totalCostUsd: 0,
-      numTurns,
-      usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+      numTurns: 0,
+      usage: { inputTokens: 0, outputTokens: 0 },
     };
     await agentStore.setSessionResult(sessionId, errorResult);
     await agentStore.updateSessionStatus(sessionId, 'error');
     return errorResult;
   }
+}
+
+/**
+ * Process SDK message and convert to AgentMessage
+ */
+async function processSDKMessage(
+  message: Record<string, unknown>,
+  sessionId: string,
+  onMessage?: MessageCallback
+): Promise<AgentMessage | null> {
+  const type = message.type as string;
+
+  switch (type) {
+    case 'assistant': {
+      const content = (message.message as Record<string, unknown>)?.content as Array<{ type: string; text?: string; name?: string; input?: unknown }>;
+      let textContent = '';
+
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text') {
+            textContent += block.text || '';
+          } else if (block.type === 'tool_use') {
+            // Add tool use message
+            const toolMessage = await agentStore.addMessage(sessionId, {
+              type: 'tool_use',
+              content: `Using tool: ${block.name}`,
+              toolName: block.name,
+              toolInput: block.input as Record<string, unknown>,
+            });
+            onMessage?.(toolMessage);
+          }
+        }
+      }
+
+      if (textContent) {
+        const assistantMessage = await agentStore.addMessage(sessionId, {
+          type: 'assistant',
+          content: textContent,
+        });
+        onMessage?.(assistantMessage);
+        return assistantMessage;
+      }
+      break;
+    }
+
+    case 'user': {
+      // Tool results come as user messages
+      const content = (message.message as Record<string, unknown>)?.content;
+      if (Array.isArray(content)) {
+        for (const block of content as Array<{ type: string; content?: unknown; tool_use_id?: string }>) {
+          if (block.type === 'tool_result') {
+            const toolResultContent = typeof block.content === 'string' 
+              ? block.content 
+              : JSON.stringify(block.content);
+
+            const toolResultMessage = await agentStore.addMessage(sessionId, {
+              type: 'tool_result',
+              content: toolResultContent.substring(0, 500) + (toolResultContent.length > 500 ? '...' : ''),
+              toolResult: block.content as string,
+              parentToolUseId: block.tool_use_id,
+            });
+            onMessage?.(toolResultMessage);
+            return toolResultMessage;
+          }
+        }
+      }
+      break;
+    }
+
+    case 'system': {
+      const systemMessage = await agentStore.addMessage(sessionId, {
+        type: 'system',
+        content: `System: ${(message as Record<string, unknown>).subtype || 'message'}`,
+      });
+      onMessage?.(systemMessage);
+      return systemMessage;
+    }
+  }
+
+  return null;
 }
 
 function calculateCost(inputTokens: number, outputTokens: number): number {
