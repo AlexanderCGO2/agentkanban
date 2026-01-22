@@ -75,10 +75,11 @@ export const PromptInputTextarea = React.forwardRef<HTMLTextAreaElement, PromptI
     const controlledValue = value !== undefined ? value : message.text;
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      // Always update internal state for submit button to work
+      setMessage((prev) => ({ ...prev, text: e.target.value }));
+      // Also call external onChange if provided
       if (onChange) {
         onChange(e);
-      } else {
-        setMessage((prev) => ({ ...prev, text: e.target.value }));
       }
 
       // Auto-resize
