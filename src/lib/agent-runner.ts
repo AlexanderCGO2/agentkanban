@@ -52,7 +52,10 @@ export async function runAgent(
 
   try {
     // Ensure output directory exists
-    const outputDir = config.outputDir || path.join(process.cwd(), 'agent-outputs', sessionId);
+    // Use /tmp for serverless environments (Vercel), otherwise use cwd
+    const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const baseDir = isServerless ? '/tmp' : process.cwd();
+    const outputDir = config.outputDir || path.join(baseDir, 'agent-outputs', sessionId);
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
