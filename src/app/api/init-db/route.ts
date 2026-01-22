@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { initializeDatabase } from '@/lib/db';
+import { initCanvasTable } from '@/lib/canvas-store';
 
 export async function POST() {
   try {
@@ -11,10 +12,11 @@ export async function POST() {
     }
 
     await initializeDatabase();
+    await initCanvasTable();
     
     return NextResponse.json({ 
       success: true, 
-      message: 'Database schema initialized successfully' 
+      message: 'Database schema initialized successfully (including canvases table)' 
     });
   } catch (error) {
     console.error('Error initializing database:', error);
