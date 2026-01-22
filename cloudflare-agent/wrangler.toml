@@ -3,9 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
-# Sandbox support - enables container-based execution
-[sandbox]
-enabled = true
+# Sandbox binding - uses the claude-code template with pre-installed dependencies
+[[sandbox]]
+binding = "SANDBOX"
 template = "claude-code"
 
 # Secrets (set via wrangler secret put)

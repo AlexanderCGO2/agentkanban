@@ -3,13 +3,43 @@
  * 
  * Runs Claude Agent SDK in Cloudflare Sandbox - fast, no cold-start issues!
  * Called from Vercel frontend API routes.
+ * 
+ * Based on: https://developers.cloudflare.com/sandbox/tutorials/claude-code/
  */
-
-import { Sandbox } from '@cloudflare/sandbox-sdk';
 
 interface Env {
   ANTHROPIC_API_KEY: string;
   ENVIRONMENT: string;
+  // Sandbox binding - defined in wrangler.toml
+  SANDBOX: {
+    create(): Promise<Sandbox>;
+  };
+}
+
+interface Sandbox {
+  exec(command: string, args?: string[], options?: ExecOptions): Promise<ExecResult>;
+  spawn(command: string, args?: string[], options?: ExecOptions): SpawnProcess;
+  writeFile(path: string, content: string): Promise<void>;
+  readFile(path: string): Promise<string>;
+  destroy(): Promise<void>;
+}
+
+interface ExecOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  timeout?: number;
+}
+
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface SpawnProcess {
+  stdout: AsyncIterable<Uint8Array>;
+  stderr: AsyncIterable<Uint8Array>;
+  wait(): Promise<{ exitCode: number }>;
 }
 
 interface AgentRequest {
@@ -50,7 +80,11 @@ export default {
 
     // Health check
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', env: env.ENVIRONMENT }), {
+      return new Response(JSON.stringify({ 
+        status: 'ok', 
+        env: env.ENVIRONMENT,
+        hasSandbox: !!env.SANDBOX 
+      }), {
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -81,13 +115,8 @@ async function handleRunAgent(request: Request, env: Env): Promise<Response> {
       });
     }
 
-    // Create sandbox with Claude Code template
-    const sandbox = await Sandbox.create({
-      template: 'claude-code',
-      env: {
-        ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-      },
-    });
+    // Create sandbox instance
+    const sandbox = await env.SANDBOX.create();
 
     try {
       // Create agent script
@@ -102,9 +131,12 @@ async function handleRunAgent(request: Request, env: Env): Promise<Response> {
       // Write script to sandbox
       await sandbox.writeFile('/home/user/agent.mjs', agentScript);
 
-      // Run the agent
+      // Run the agent - Claude Code is pre-installed in the sandbox template!
       const result = await sandbox.exec('node', ['agent.mjs'], {
         cwd: '/home/user',
+        env: {
+          ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+        },
         timeout: 300000, // 5 minutes
       });
 
@@ -187,72 +219,71 @@ async function handleStreamAgent(request: Request, env: Env): Promise<Response> 
 
   // Start processing in background
   (async () => {
+    let sandbox: Sandbox | null = null;
     try {
       // Create sandbox
-      const sandbox = await Sandbox.create({
-        template: 'claude-code',
+      sandbox = await env.SANDBOX.create();
+
+      const agentScript = buildAgentScript({
+        prompt,
+        systemPrompt: systemPrompt || 'You are a helpful AI assistant.',
+        allowedTools: allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep'],
+        permissionMode: permissionMode || 'acceptEdits',
+        maxTurns: maxTurns || 20,
+      });
+
+      await sandbox.writeFile('/home/user/agent.mjs', agentScript);
+
+      // Stream output line by line
+      const process = sandbox.spawn('node', ['agent.mjs'], {
+        cwd: '/home/user',
         env: {
           ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
         },
       });
 
-      try {
-        const agentScript = buildAgentScript({
-          prompt,
-          systemPrompt: systemPrompt || 'You are a helpful AI assistant.',
-          allowedTools: allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep'],
-          permissionMode: permissionMode || 'acceptEdits',
-          maxTurns: maxTurns || 20,
-        });
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let buffer = '';
 
-        await sandbox.writeFile('/home/user/agent.mjs', agentScript);
+      // Read stdout
+      for await (const chunk of process.stdout) {
+        buffer += new TextDecoder().decode(chunk);
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
-        // Stream output line by line
-        const process = await sandbox.spawn('node', ['agent.mjs'], {
-          cwd: '/home/user',
-        });
+        for (const line of lines) {
+          if (line.startsWith('__MSG__')) {
+            try {
+              const msg = JSON.parse(line.slice(7));
+              const processed = processMessage(msg);
 
-        let totalInputTokens = 0;
-        let totalOutputTokens = 0;
-
-        // Read stdout
-        for await (const chunk of process.stdout) {
-          const text = new TextDecoder().decode(chunk);
-          const lines = text.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('__MSG__')) {
-              try {
-                const msg = JSON.parse(line.slice(7));
-                const processed = processMessage(msg);
-
-                if (msg.result) {
-                  totalInputTokens = msg.result.usage?.input_tokens || 0;
-                  totalOutputTokens = msg.result.usage?.output_tokens || 0;
-                }
-
-                await writer.write(encoder.encode(`data: ${JSON.stringify(processed)}\n\n`));
-              } catch {
-                // Skip malformed
+              if (msg.result) {
+                totalInputTokens = msg.result.usage?.input_tokens || 0;
+                totalOutputTokens = msg.result.usage?.output_tokens || 0;
               }
-            } else if (line.startsWith('__ERR__')) {
-              await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: line.slice(7) })}\n\n`));
-            } else if (line.startsWith('__DONE__')) {
-              await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } })}\n\n`));
+
+              await writer.write(encoder.encode(`data: ${JSON.stringify(processed)}\n\n`));
+            } catch {
+              // Skip malformed
             }
+          } else if (line.startsWith('__ERR__')) {
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: line.slice(7) })}\n\n`));
+          } else if (line.startsWith('__DONE__')) {
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } })}\n\n`));
           }
         }
-
-        await process.wait();
-
-      } finally {
-        await sandbox.destroy();
       }
+
+      await process.wait();
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: errorMsg })}\n\n`));
     } finally {
+      if (sandbox) {
+        await sandbox.destroy();
+      }
       await writer.close();
     }
   })();
@@ -318,6 +349,8 @@ function buildAgentScript(config: {
   permissionMode: string;
   maxTurns: number;
 }): string {
+  // Note: In the Cloudflare Sandbox, Claude Code is pre-installed
+  // The agent-sdk uses it to execute tools
   return `
 import { query } from "@anthropic-ai/claude-agent-sdk";
 

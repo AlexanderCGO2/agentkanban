@@ -18,14 +18,29 @@ cd cloudflare-agent
 npm install
 ```
 
-### 2. Configure secrets
+### 2. Cloudflare Authentication
 
+**Option A: Interactive Login (Recommended for first-time setup)**
 ```bash
-# Set your Anthropic API key
-wrangler secret put ANTHROPIC_API_KEY
+npx wrangler login
 ```
 
-### 3. Local development
+**Option B: API Token (For CI/CD)**
+1. Go to https://dash.cloudflare.com/profile/api-tokens
+2. Create a token with "Edit Cloudflare Workers" permissions
+3. Set the environment variable:
+```bash
+export CLOUDFLARE_API_TOKEN=your_token_here
+```
+
+### 3. Set Anthropic API Key
+
+```bash
+npx wrangler secret put ANTHROPIC_API_KEY
+# Enter your Anthropic API key when prompted
+```
+
+### 4. Local Development
 
 Create `.dev.vars` file:
 ```
@@ -37,10 +52,21 @@ Then run:
 npm run dev
 ```
 
-### 4. Deploy
+### 5. Deploy
 
 ```bash
 npm run deploy
+```
+
+After deployment, note the URL (e.g., `https://agentkanban-worker.YOUR-SUBDOMAIN.workers.dev`)
+
+### 6. Configure Vercel
+
+Add the Cloudflare Worker URL to your Vercel project:
+
+```bash
+vercel env add CLOUDFLARE_AGENT_URL
+# Enter: https://agentkanban-worker.YOUR-SUBDOMAIN.workers.dev
 ```
 
 ## API Endpoints
@@ -49,7 +75,7 @@ npm run deploy
 Run agent and get result when complete.
 
 ```bash
-curl -X POST https://agentkanban-worker.your-subdomain.workers.dev/run \
+curl -X POST https://agentkanban-worker.YOUR-SUBDOMAIN.workers.dev/run \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Create a hello world Python script",
@@ -63,7 +89,7 @@ curl -X POST https://agentkanban-worker.your-subdomain.workers.dev/run \
 Run agent with SSE streaming (real-time updates).
 
 ```bash
-curl -X POST https://agentkanban-worker.your-subdomain.workers.dev/stream \
+curl -X POST https://agentkanban-worker.YOUR-SUBDOMAIN.workers.dev/stream \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Research the weather in NYC",
@@ -75,18 +101,8 @@ curl -X POST https://agentkanban-worker.your-subdomain.workers.dev/stream \
 Health check endpoint.
 
 ```bash
-curl https://agentkanban-worker.your-subdomain.workers.dev/health
+curl https://agentkanban-worker.YOUR-SUBDOMAIN.workers.dev/health
 ```
-
-## Integration with Vercel Frontend
-
-Set the `CLOUDFLARE_AGENT_URL` environment variable in your Vercel project:
-
-```
-CLOUDFLARE_AGENT_URL=https://agentkanban-worker.your-subdomain.workers.dev
-```
-
-The frontend will automatically route agent execution to the Cloudflare Worker.
 
 ## Architecture
 
@@ -115,14 +131,21 @@ The frontend will automatically route agent execution to the Cloudflare Worker.
 
 ## Troubleshooting
 
-### "Template not found" error
-Make sure your Cloudflare account has Sandbox enabled (Workers Paid plan).
+### "Unexpected fields found in top-level field: sandbox"
+Make sure you have a Cloudflare Workers Paid plan with Sandbox enabled.
+Contact Cloudflare support to enable Sandbox for your account.
 
-### Timeout errors
-Increase the timeout in `wrangler.toml` or contact Cloudflare support for extended limits.
+### "Failed to fetch auth token"
+Run `npx wrangler login` to authenticate, or set `CLOUDFLARE_API_TOKEN`.
 
 ### API key errors
 Verify `ANTHROPIC_API_KEY` is set correctly:
 ```bash
-wrangler secret list
+npx wrangler secret list
 ```
+
+## Requirements
+
+- Cloudflare Workers Paid plan with Sandbox enabled
+- Anthropic API key
+- Node.js 18+
