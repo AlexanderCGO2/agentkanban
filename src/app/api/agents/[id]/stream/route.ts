@@ -20,7 +20,7 @@ export async function POST(
       });
     }
 
-    const agent = agentStore.getAgent(id);
+    const agent = await agentStore.getAgent(id);
     if (!agent) {
       return new Response(JSON.stringify({ error: 'Agent not found' }), {
         status: 404,
@@ -29,7 +29,7 @@ export async function POST(
     }
 
     // Create a new session
-    const session = agentStore.createSession(id);
+    const session = await agentStore.createSession(id);
 
     // Create a readable stream for SSE
     const encoder = new TextEncoder();
@@ -47,7 +47,7 @@ export async function POST(
           const result = await runAgent(agent, session.id, prompt, sendMessage);
 
           // Get output files for this session
-          const outputFiles = agentStore.getOutputFiles(session.id);
+          const outputFiles = await agentStore.getOutputFiles(session.id);
 
           // Send final result with output files
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', result, outputFiles })}\n\n`));

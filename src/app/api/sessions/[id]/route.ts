@@ -5,26 +5,42 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const session = agentStore.getSession(id);
+  try {
+    const { id } = await params;
+    const session = await agentStore.getSession(id);
 
-  if (!session) {
-    return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    if (!session) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(session);
+  } catch (error) {
+    console.error('Error fetching session:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch session' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json(session);
 }
 
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const deleted = agentStore.deleteSession(id);
+  try {
+    const { id } = await params;
+    const deleted = await agentStore.deleteSession(id);
 
-  if (!deleted) {
-    return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    if (!deleted) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting session:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete session' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ success: true });
 }

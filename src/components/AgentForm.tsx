@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ToolName, PermissionMode } from '@/types/agent';
+import { ToolName, PermissionMode, AgentRole } from '@/types/agent';
+import { AGENT_TEMPLATES, AgentTemplate, getAllTemplates } from '@/lib/agent-templates';
 
 const AVAILABLE_TOOLS: ToolName[] = [
   'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'NotebookEdit'
@@ -9,6 +10,7 @@ const AVAILABLE_TOOLS: ToolName[] = [
 
 interface CreateAgentRequest {
   name: string;
+  role: AgentRole;
   prompt: string;
   allowedTools: ToolName[];
   permissionMode: PermissionMode;
@@ -30,8 +32,14 @@ interface AgentFormProps {
   loading?: boolean;
 }
 
+type FormStep = 'template' | 'configure';
+
 export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
+  const [step, setStep] = useState<FormStep>('template');
+  const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null);
+  
   const [name, setName] = useState('');
+  const [role, setRole] = useState<AgentRole>('custom');
   const [prompt, setPrompt] = useState('');
   const [allowedTools, setAllowedTools] = useState<ToolName[]>(['Read', 'Write', 'Glob', 'Grep']);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('acceptEdits');
@@ -40,6 +48,33 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
   const [enableReplicate, setEnableReplicate] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const templates = getAllTemplates();
+
+  const handleSelectTemplate = (template: AgentTemplate) => {
+    setSelectedTemplate(template);
+    setName(template.name);
+    setRole(template.role);
+    setPrompt(template.defaultPrompt);
+    setAllowedTools(template.allowedTools);
+    setPermissionMode(template.permissionMode);
+    setMaxTurns(template.maxTurns);
+    setSystemPrompt(template.systemPrompt);
+    setStep('configure');
+  };
+
+  const handleSelectCustom = () => {
+    const customTemplate = AGENT_TEMPLATES.custom;
+    setSelectedTemplate(customTemplate);
+    setRole('custom');
+    setName('');
+    setPrompt('');
+    setAllowedTools(['Read', 'Write', 'Glob', 'Grep']);
+    setPermissionMode('acceptEdits');
+    setMaxTurns(undefined);
+    setSystemPrompt('');
+    setStep('configure');
+  };
 
   const handleToolToggle = (tool: ToolName) => {
     setAllowedTools(prev =>
@@ -69,6 +104,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
     try {
       await onSubmit({
         name: name.trim(),
+        role,
         prompt: prompt.trim(),
         allowedTools,
         permissionMode,
@@ -77,7 +113,10 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
         enableReplicate,
       });
       // Reset form on success
+      setStep('template');
+      setSelectedTemplate(null);
       setName('');
+      setRole('custom');
       setPrompt('');
       setAllowedTools(['Read', 'Write', 'Glob', 'Grep']);
       setPermissionMode('acceptEdits');
@@ -89,8 +128,105 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
     }
   };
 
+  const handleBack = () => {
+    setStep('template');
+    setSelectedTemplate(null);
+  };
+
+  // Template selection step
+  if (step === 'template') {
+    return (
+      <div className="space-y-6">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Choose an agent template to get started quickly, or create a custom agent from scratch.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+          {templates.map((template) => (
+            <button
+              key={template.role}
+              onClick={() => handleSelectTemplate(template)}
+              className={`group relative overflow-hidden rounded-xl border-2 p-4 text-left transition-all hover:scale-[1.02] hover:shadow-lg ${template.color.border} ${template.color.bg}`}
+            >
+              <div className={`absolute inset-0 bg-gradient-to-br ${template.color.gradient} opacity-0 transition-opacity group-hover:opacity-10`} />
+              <div className="relative">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">{template.icon}</span>
+                  <h3 className={`font-semibold ${template.color.text}`}>
+                    {template.name}
+                  </h3>
+                </div>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 line-clamp-2">
+                  {template.description}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {template.skills.slice(0, 2).map((skill, i) => (
+                    <span
+                      key={i}
+                      className="rounded-full bg-white/60 dark:bg-black/20 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:text-zinc-300"
+                    >
+                      {skill.input} → {skill.output}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Custom Agent Option */}
+        <button
+          onClick={handleSelectCustom}
+          className="w-full rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-4 text-left transition-all hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">⚙️</span>
+            <div>
+              <h3 className="font-semibold text-zinc-700 dark:text-zinc-300">
+                Custom Agent
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Create a fully customized agent from scratch
+              </p>
+            </div>
+          </div>
+        </button>
+
+        {onCancel && (
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-lg border border-zinc-300 px-4 py-2 font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Configuration step
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Template Header */}
+      {selectedTemplate && selectedTemplate.role !== 'custom' && (
+        <div className={`-mx-6 -mt-6 px-6 py-4 mb-6 ${selectedTemplate.color.bg} border-b ${selectedTemplate.color.border}`}>
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">{selectedTemplate.icon}</span>
+            <div>
+              <h3 className={`font-bold text-lg ${selectedTemplate.color.text}`}>
+                {selectedTemplate.name}
+              </h3>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                {selectedTemplate.description}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
           {error}
@@ -119,7 +255,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
           id="prompt"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          rows={4}
+          rows={3}
           placeholder="Describe what this agent should do..."
           className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500"
         />
@@ -230,21 +366,81 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
 
           <div>
             <label htmlFor="systemPrompt" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Custom System Prompt (optional)
+              System Prompt
             </label>
             <textarea
               id="systemPrompt"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={3}
+              rows={4}
               placeholder="Custom instructions for the agent..."
-              className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-white dark:placeholder-zinc-500"
+              className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-white dark:placeholder-zinc-500 font-mono text-sm"
             />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {selectedTemplate?.role !== 'custom' && 'Pre-filled from template. '}
+              Defines the agent&apos;s personality and behavior.
+            </p>
           </div>
+
+          {/* MCP Tools Info for templates */}
+          {selectedTemplate && selectedTemplate.mcpTools.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                Recommended MCP Tools
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {selectedTemplate.mcpTools.map((tool, i) => (
+                  <span
+                    key={i}
+                    className="rounded-full bg-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300"
+                  >
+                    {tool}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                Configure MCP servers separately to enable these integrations
+              </p>
+            </div>
+          )}
+
+          {/* Skill Matrix for templates */}
+          {selectedTemplate && selectedTemplate.skills.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                Skill Matrix (Input → Output)
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {selectedTemplate.skills.map((skill, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 rounded-lg bg-white p-2 dark:bg-zinc-700"
+                  >
+                    <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                      {skill.input}
+                    </span>
+                    <svg className="h-3 w-3 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span className="text-xs font-medium text-zinc-900 dark:text-zinc-200">
+                      {skill.output}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       <div className="flex gap-3 pt-2">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="rounded-lg border border-zinc-300 px-4 py-2 font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          ← Back
+        </button>
         <button
           type="submit"
           disabled={loading}

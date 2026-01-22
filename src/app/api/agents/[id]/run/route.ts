@@ -16,19 +16,19 @@ export async function POST(
       return NextResponse.json({ error: 'Missing prompt' }, { status: 400 });
     }
 
-    const agent = agentStore.getAgent(id);
+    const agent = await agentStore.getAgent(id);
     if (!agent) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
     }
 
     // Create a new session
-    const session = agentStore.createSession(id);
+    const session = await agentStore.createSession(id);
 
     // Run the agent (non-streaming for simplicity, streaming handled via SSE endpoint)
     const result = await runAgent(agent, session.id, prompt);
 
     // Get updated session with all messages
-    const updatedSession = agentStore.getSession(session.id);
+    const updatedSession = await agentStore.getSession(session.id);
 
     return NextResponse.json({
       session: updatedSession,

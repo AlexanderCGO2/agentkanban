@@ -14,6 +14,17 @@ export type ToolName =
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
+export type AgentRole = 
+  | 'design'
+  | 'intern'
+  | 'project-manager'
+  | 'team-assist'
+  | 'data-analyst'
+  | 'copywriter'
+  | 'accountant'
+  | 'developer'
+  | 'custom';
+
 export type OutputFileType = 'text' | 'markdown' | 'json' | 'csv' | 'image' | 'pdf' | 'other';
 
 export interface OutputFile {
@@ -38,6 +49,7 @@ export interface McpServerConfig {
 export interface AgentConfig {
   id: string;
   name: string;
+  role: AgentRole;
   prompt: string;
   allowedTools: ToolName[];
   permissionMode: PermissionMode;
@@ -89,6 +101,7 @@ export interface AgentResult {
 
 export interface CreateAgentRequest {
   name: string;
+  role: AgentRole;
   prompt: string;
   allowedTools: ToolName[];
   permissionMode: PermissionMode;

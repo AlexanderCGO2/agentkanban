@@ -5,14 +5,22 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const agent = agentStore.getAgent(id);
+  try {
+    const { id } = await params;
+    const agent = await agentStore.getAgent(id);
 
-  if (!agent) {
-    return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    if (!agent) {
+      return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(agent);
+  } catch (error) {
+    console.error('Error fetching agent:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch agent' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json(agent);
 }
 
 export async function PATCH(
@@ -23,7 +31,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const updated = agentStore.updateAgent(id, body);
+    const updated = await agentStore.updateAgent(id, body);
 
     if (!updated) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
@@ -43,12 +51,20 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const deleted = agentStore.deleteAgent(id);
+  try {
+    const { id } = await params;
+    const deleted = await agentStore.deleteAgent(id);
 
-  if (!deleted) {
-    return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    if (!deleted) {
+      return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting agent:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete agent' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ success: true });
 }

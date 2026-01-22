@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { agentStore } from '@/lib/agent-store';
-import { CreateAgentRequest, ToolName, PermissionMode } from '@/types/agent';
+import { CreateAgentRequest, ToolName, PermissionMode, AgentRole } from '@/types/agent';
 
 export async function GET() {
-  const agents = agentStore.getAllAgents();
-  return NextResponse.json(agents);
+  try {
+    const agents = await agentStore.getAllAgents();
+    return NextResponse.json(agents);
+  } catch (error) {
+    console.error('Error fetching agents:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch agents' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -21,7 +29,7 @@ export async function POST(request: NextRequest) {
 
     // Validate tool names
     const validTools: ToolName[] = [
-      'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task'
+      'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'NotebookEdit'
     ];
     const invalidTools = body.allowedTools.filter(t => !validTools.includes(t));
     if (invalidTools.length > 0) {
@@ -40,8 +48,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const agent = agentStore.createAgent({
+    // Validate role
+    const validRoles: AgentRole[] = [
+      'design', 'intern', 'project-manager', 'team-assist', 
+      'data-analyst', 'copywriter', 'accountant', 'developer', 'custom'
+    ];
+    const role = body.role || 'custom';
+    if (!validRoles.includes(role)) {
+      return NextResponse.json(
+        { error: `Invalid role: ${role}` },
+        { status: 400 }
+      );
+    }
+
+    const agent = await agentStore.createAgent({
       name: body.name,
+      role: role,
       prompt: body.prompt,
       allowedTools: body.allowedTools,
       permissionMode: body.permissionMode,

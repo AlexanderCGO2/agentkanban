@@ -1,10 +1,34 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { AgentConfig, AgentMessage, AgentResult, OutputFile, OutputFileType } from '@/types/agent';
+import { AgentConfig, AgentMessage, AgentResult, OutputFileType } from '@/types/agent';
 import { agentStore } from './agent-store';
 import * as path from 'path';
 import * as fs from 'fs';
 
 export type MessageCallback = (message: AgentMessage) => void;
+
+/**
+ * Constructs the full prompt by combining the agent's base task description
+ * with the user's specific request.
+ */
+function buildFullPrompt(config: AgentConfig, userPrompt: string): string {
+  // If the agent has a base prompt (task description), combine it with user input
+  if (config.prompt && config.prompt.trim()) {
+    return `## Agent Task
+${config.prompt}
+
+## User Request
+${userPrompt}
+
+## Instructions
+Complete the user request following your agent task guidelines. Use your tools proactively to accomplish the task. Create output files for any artifacts you produce.`;
+  }
+  
+  // If no base prompt, just use the user prompt with agentic instructions
+  return `${userPrompt}
+
+## Instructions
+Use your tools proactively to accomplish this task. Create output files for any artifacts you produce.`;
+}
 
 export async function runAgent(
   config: AgentConfig,
@@ -12,10 +36,13 @@ export async function runAgent(
   prompt: string,
   onMessage?: MessageCallback
 ): Promise<AgentResult> {
-  agentStore.updateSessionStatus(sessionId, 'running');
+  await agentStore.updateSessionStatus(sessionId, 'running');
 
-  // Add user message
-  const userMessage = agentStore.addMessage(sessionId, {
+  // Build the full prompt combining agent config and user request
+  const fullPrompt = buildFullPrompt(config, prompt);
+
+  // Add user message (show the original prompt to user)
+  const userMessage = await agentStore.addMessage(sessionId, {
     type: 'user',
     content: prompt,
   });
@@ -31,15 +58,16 @@ export async function runAgent(
     }
 
     const queryOptions: Parameters<typeof query>[0] = {
-      prompt,
+      prompt: fullPrompt,
       options: {
         allowedTools: config.allowedTools,
         permissionMode: config.permissionMode,
-        maxTurns: config.maxTurns,
+        maxTurns: config.maxTurns || 20, // Default to 20 turns for agentic behavior
         cwd: config.cwd || outputDir,
       },
     };
 
+    // Always include system prompt for agentic behavior
     if (config.systemPrompt) {
       queryOptions.options!.systemPrompt = config.systemPrompt;
     }
@@ -64,17 +92,17 @@ export async function runAgent(
     }
 
     for await (const message of query(queryOptions)) {
-      const agentMessage = processSDKMessage(message, sessionId, outputDir, onMessage);
+      await processSDKMessage(message, sessionId, outputDir, onMessage);
 
       // Capture session ID from init message
       if (message.type === 'system' && 'subtype' in message && message.subtype === 'init') {
-        agentStore.setSessionId(sessionId, message.session_id);
+        await agentStore.setSessionId(sessionId, message.session_id);
       }
 
       // Handle result message
       if (message.type === 'result') {
         const result = createResult(message, startTime);
-        agentStore.setSessionResult(sessionId, result);
+        await agentStore.setSessionResult(sessionId, result);
         return result;
       }
     }
@@ -88,7 +116,7 @@ export async function runAgent(
       numTurns: 0,
       usage: { inputTokens: 0, outputTokens: 0 },
     };
-    agentStore.setSessionResult(sessionId, fallbackResult);
+    await agentStore.setSessionResult(sessionId, fallbackResult);
     return fallbackResult;
 
   } catch (error) {
@@ -100,8 +128,8 @@ export async function runAgent(
       numTurns: 0,
       usage: { inputTokens: 0, outputTokens: 0 },
     };
-    agentStore.setSessionResult(sessionId, errorResult);
-    agentStore.updateSessionStatus(sessionId, 'error');
+    await agentStore.setSessionResult(sessionId, errorResult);
+    await agentStore.updateSessionStatus(sessionId, 'error');
     return errorResult;
   }
 }
@@ -155,7 +183,7 @@ function getMimeType(filename: string): string {
   return mimeTypes[ext] || 'application/octet-stream';
 }
 
-function trackFileOutput(sessionId: string, filePath: string, outputDir: string): void {
+async function trackFileOutput(sessionId: string, filePath: string, outputDir: string): Promise<void> {
   try {
     const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(outputDir, filePath);
 
@@ -170,7 +198,7 @@ function trackFileOutput(sessionId: string, filePath: string, outputDir: string)
         content = fs.readFileSync(absolutePath, 'utf-8');
       }
 
-      agentStore.addOutputFile(sessionId, {
+      await agentStore.addOutputFile(sessionId, {
         filename,
         path: absolutePath,
         type: fileType,
@@ -184,12 +212,12 @@ function trackFileOutput(sessionId: string, filePath: string, outputDir: string)
   }
 }
 
-function processSDKMessage(
+async function processSDKMessage(
   message: Awaited<ReturnType<typeof query> extends AsyncGenerator<infer T> ? T : never>,
   sessionId: string,
   outputDir: string,
   onMessage?: MessageCallback
-): AgentMessage | null {
+): Promise<AgentMessage | null> {
   let agentMessage: Omit<AgentMessage, 'id' | 'timestamp'> | null = null;
 
   switch (message.type) {
@@ -212,7 +240,7 @@ function processSDKMessage(
           }
 
           // Add tool use message
-          const toolMessage = agentStore.addMessage(sessionId, {
+          const toolMessage = await agentStore.addMessage(sessionId, {
             type: 'tool_use',
             content: `Using tool: ${block.name}`,
             toolName: block.name,
@@ -247,7 +275,7 @@ function processSDKMessage(
             if (typeof block.content === 'string' && block.content.match(/https?:\/\/.*\.(png|jpg|jpeg|gif|webp)/i)) {
               const imageUrl = block.content.match(/https?:\/\/[^\s"]+\.(png|jpg|jpeg|gif|webp)/i)?.[0];
               if (imageUrl) {
-                agentStore.addOutputFile(sessionId, {
+                await agentStore.addOutputFile(sessionId, {
                   filename: `generated-image-${Date.now()}.png`,
                   path: imageUrl,
                   type: 'image',
@@ -258,7 +286,7 @@ function processSDKMessage(
               }
             }
 
-            const toolResultMessage = agentStore.addMessage(sessionId, {
+            const toolResultMessage = await agentStore.addMessage(sessionId, {
               type: 'tool_result',
               content: toolResultContent.substring(0, 500) + (toolResultContent.length > 500 ? '...' : ''),
               toolResult: block.content,
@@ -297,7 +325,7 @@ function processSDKMessage(
   }
 
   if (agentMessage) {
-    const fullMessage = agentStore.addMessage(sessionId, agentMessage);
+    const fullMessage = await agentStore.addMessage(sessionId, agentMessage);
     onMessage?.(fullMessage);
     return fullMessage;
   }
