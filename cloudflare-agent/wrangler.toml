@@ -1,0 +1,16 @@
+name = "agentkanban-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Sandbox support - enables container-based execution
+[sandbox]
+enabled = true
+template = "claude-code"
+
+# Secrets (set via wrangler secret put)
+# ANTHROPIC_API_KEY = "..."
+
+# Environment variables
+[vars]
+ENVIRONMENT = "production"

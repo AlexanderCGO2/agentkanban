@@ -10,7 +10,12 @@ export type ToolName =
   | 'WebSearch'
   | 'WebFetch'
   | 'Task'
-  | 'NotebookEdit';
+  | 'NotebookEdit'
+  | 'MCP'
+  | 'canvas_create'
+  | 'canvas_add_node'
+  | 'canvas_get'
+  | 'mindmap_create';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
@@ -59,6 +64,7 @@ export interface AgentConfig {
   outputDir?: string;
   mcpServers?: Record<string, McpServerConfig>;
   enableReplicate?: boolean;
+  model?: string;
 }
 
 export interface AgentMessage {

@@ -1,0 +1,23 @@
+{
+  "name": "cloudflare-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250117.0",
+    "typescript": "^5.3.0",
+    "wrangler": "^3.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.0.3",
+    "@anthropic-ai/claude-code": "^0.2.0",
+    "@anthropic-ai/claude-code-sandbox": "^1.0.0",
+    "@cloudflare/sandbox-sdk": "^1.0.0"
+  }
+}
