@@ -285,7 +285,7 @@ ${VERIFICATION_CHECKLIST}`,
         command: 'npx',
         args: ['ts-node', '--esm', 'src/lib/design-mcp-server.ts'],
         env: {
-          DESIGN_MCP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+          DESIGN_MCP_URL: 'https://agentkanban.vercel.app',
         },
       },
     },
