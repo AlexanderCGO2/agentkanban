@@ -74,6 +74,13 @@ export const PromptInputTextarea = React.forwardRef<HTMLTextAreaElement, PromptI
 
     const controlledValue = value !== undefined ? value : message.text;
 
+    // Sync internal state when controlled value changes (e.g., from suggestions)
+    React.useEffect(() => {
+      if (value !== undefined && value !== message.text) {
+        setMessage((prev) => ({ ...prev, text: value }));
+      }
+    }, [value, message.text, setMessage]);
+
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       // Always update internal state for submit button to work
       setMessage((prev) => ({ ...prev, text: e.target.value }));
