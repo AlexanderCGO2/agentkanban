@@ -4,9 +4,6 @@ import { agentStore } from './agent-store';
 
 export type MessageCallback = (message: AgentMessage) => void;
 
-// Get MCP server URL for canvas tools
-const MCP_SERVER_URL = process.env.DESIGN_MCP_URL || 'https://agentkanban.vercel.app';
-
 /**
  * Constructs the full prompt by combining the agent's base task description
  * with the user's specific request.
@@ -28,7 +25,7 @@ Complete the user request following your agent task guidelines.`;
 
 /**
  * Run agent using Vercel Sandbox with Claude Agent SDK
- * This creates an isolated VM that can run the full agent loop
+ * This creates an isolated VM that can run the full agent loop with all tools
  */
 export async function runAgent(
   config: AgentConfig,
@@ -50,33 +47,45 @@ export async function runAgent(
   const startTime = Date.now();
 
   try {
-    // Create Vercel Sandbox
+    // Create Vercel Sandbox with Node 22 runtime
     const sandbox = await Sandbox.create({
-      timeoutMs: 300000, // 5 minutes max
+      runtime: 'node22',
+      timeout: 300000, // 5 minutes
+      resources: { vcpus: 2 },
     });
 
     try {
-      // Install dependencies in sandbox
-      await sandbox.commands.run('npm init -y && npm install @anthropic-ai/claude-agent-sdk', {
-        timeoutMs: 120000,
+      // 1) Install Claude Code CLI globally
+      await sandbox.runCommand({
+        cmd: 'npm',
+        args: ['install', '-g', '@anthropic-ai/claude-code'],
+        sudo: true,
       });
 
-      // Create the agent script
+      // 2) Initialize npm and install Agent SDK in working directory
+      await sandbox.runCommand({
+        cmd: 'npm',
+        args: ['init', '-y'],
+      });
+
+      await sandbox.runCommand({
+        cmd: 'npm',
+        args: ['install', '@anthropic-ai/claude-agent-sdk'],
+      });
+
+      // 3) Create the agent script
       const agentScript = `
-const { query } = require('@anthropic-ai/claude-agent-sdk');
+import { query } from "@anthropic-ai/claude-agent-sdk";
 
-async function runAgent() {
-  const prompt = ${JSON.stringify(fullPrompt)};
-  const systemPrompt = ${JSON.stringify(config.systemPrompt || 'You are a helpful AI assistant.')};
-  const allowedTools = ${JSON.stringify(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch'])};
-  const permissionMode = ${JSON.stringify(config.permissionMode || 'acceptEdits')};
-  const maxTurns = ${config.maxTurns || 20};
+const prompt = ${JSON.stringify(fullPrompt)};
+const systemPrompt = ${JSON.stringify(config.systemPrompt || 'You are a helpful AI assistant.')};
+const allowedTools = ${JSON.stringify(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep'])};
+const permissionMode = ${JSON.stringify(config.permissionMode || 'acceptEdits')};
+const maxTurns = ${config.maxTurns || 20};
 
-  const messages = [];
-  let result = null;
-
+async function run() {
   try {
-    for await (const message of query({
+    const it = query({
       prompt,
       options: {
         systemPrompt,
@@ -84,112 +93,152 @@ async function runAgent() {
         permissionMode,
         maxTurns,
       },
-    })) {
-      messages.push({ type: message.type, data: message });
-      
-      // Output each message as JSON line for streaming
-      console.log('__MSG__' + JSON.stringify(message));
+    });
 
-      if (message.type === 'result') {
-        result = message;
-      }
+    for await (const msg of it) {
+      // Output structured messages for parsing
+      console.log('__MSG__' + JSON.stringify({
+        type: msg.type,
+        text: msg.type === 'assistant' ? (msg.message?.content || []).filter(b => b.type === 'text').map(b => b.text).join('') : undefined,
+        toolUse: msg.type === 'assistant' ? (msg.message?.content || []).filter(b => b.type === 'tool_use') : undefined,
+        toolResult: msg.type === 'user' ? (msg.message?.content || []).filter(b => b.type === 'tool_result') : undefined,
+        result: msg.type === 'result' ? msg : undefined,
+        subtype: msg.subtype,
+      }));
     }
+    console.log('__DONE__');
   } catch (error) {
-    console.log('__ERR__' + JSON.stringify({ error: error.message || String(error) }));
+    console.log('__ERR__' + (error.message || String(error)));
   }
-
-  console.log('__DONE__' + JSON.stringify({ result, messageCount: messages.length }));
 }
 
-runAgent().catch(err => {
-  console.log('__ERR__' + JSON.stringify({ error: err.message || String(err) }));
-});
+run();
 `;
 
-      // Write and run the agent script
-      await sandbox.files.write('agent.js', agentScript);
-      
-      // Set API key
+      // Write the agent script to sandbox
+      await sandbox.writeFiles([
+        { path: '/vercel/sandbox/agent.mjs', content: Buffer.from(agentScript) },
+      ]);
+
+      // 4) Run the agent script with API key
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
         throw new Error('ANTHROPIC_API_KEY not set');
       }
 
-      // Run the agent script and collect output
-      const execution = await sandbox.commands.run(`ANTHROPIC_API_KEY="${apiKey}" node agent.js`, {
-        timeoutMs: 240000, // 4 minutes for execution
+      const run = await sandbox.runCommand({
+        cmd: 'node',
+        args: ['agent.mjs'],
+        env: {
+          ANTHROPIC_API_KEY: apiKey,
+        },
       });
 
+      // Get stdout and stderr from the command
+      const stdout = await run.stdout();
+      const stderr = await run.stderr();
+
       // Process the output
-      const lines = execution.stdout.split('\n');
-      let agentResult: AgentResult | null = null;
+      const lines = (stdout || '').split('\n');
+      let numTurns = 0;
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
-      let numTurns = 0;
+      let finalResult = '';
 
       for (const line of lines) {
         if (line.startsWith('__MSG__')) {
           try {
-            const message = JSON.parse(line.slice(7));
-            const agentMessage = await processSDKMessage(message, sessionId, onMessage);
+            const msg = JSON.parse(line.slice(7));
             
-            // Track turns
-            if (message.type === 'assistant') {
+            // Process assistant text
+            if (msg.type === 'assistant' && msg.text) {
               numTurns++;
+              finalResult = msg.text;
+              const assistantMessage = await agentStore.addMessage(sessionId, {
+                type: 'assistant',
+                content: msg.text,
+              });
+              onMessage?.(assistantMessage);
             }
-            
-            // Track usage from result
-            if (message.type === 'result') {
-              totalInputTokens = message.usage?.input_tokens || 0;
-              totalOutputTokens = message.usage?.output_tokens || 0;
+
+            // Process tool use
+            if (msg.toolUse && Array.isArray(msg.toolUse)) {
+              for (const tool of msg.toolUse) {
+                const toolMessage = await agentStore.addMessage(sessionId, {
+                  type: 'tool_use',
+                  content: `Using tool: ${tool.name}`,
+                  toolName: tool.name,
+                  toolInput: tool.input,
+                });
+                onMessage?.(toolMessage);
+              }
             }
+
+            // Process tool results
+            if (msg.toolResult && Array.isArray(msg.toolResult)) {
+              for (const result of msg.toolResult) {
+                const content = typeof result.content === 'string' 
+                  ? result.content 
+                  : JSON.stringify(result.content);
+                const toolResultMessage = await agentStore.addMessage(sessionId, {
+                  type: 'tool_result',
+                  content: content.substring(0, 500) + (content.length > 500 ? '...' : ''),
+                  toolResult: result.content,
+                  parentToolUseId: result.tool_use_id,
+                });
+                onMessage?.(toolResultMessage);
+              }
+            }
+
+            // Process final result
+            if (msg.result) {
+              totalInputTokens = msg.result.usage?.input_tokens || 0;
+              totalOutputTokens = msg.result.usage?.output_tokens || 0;
+              finalResult = msg.result.result || finalResult;
+            }
+
+            // Process system messages
+            if (msg.type === 'system') {
+              const systemMessage = await agentStore.addMessage(sessionId, {
+                type: 'system',
+                content: `System: ${msg.subtype || 'message'}`,
+              });
+              onMessage?.(systemMessage);
+            }
+
           } catch (e) {
-            console.error('Failed to parse message:', line);
+            console.error('Failed to parse message:', line, e);
           }
         } else if (line.startsWith('__ERR__')) {
-          const error = JSON.parse(line.slice(7));
-          throw new Error(error.error);
-        } else if (line.startsWith('__DONE__')) {
-          const done = JSON.parse(line.slice(8));
-          if (done.result) {
-            agentResult = {
-              success: true,
-              result: done.result.result || '',
-              durationMs: Date.now() - startTime,
-              totalCostUsd: calculateCost(totalInputTokens, totalOutputTokens),
-              numTurns,
-              usage: {
-                inputTokens: totalInputTokens,
-                outputTokens: totalOutputTokens,
-              },
-            };
-          }
+          throw new Error(line.slice(7));
         }
       }
 
       // Handle stderr errors
-      if (execution.stderr && !agentResult) {
-        throw new Error(execution.stderr);
+      if (stderr && run.exitCode !== 0) {
+        console.error('Sandbox stderr:', stderr);
       }
 
-      if (!agentResult) {
-        agentResult = {
-          success: false,
-          error: 'Agent completed without result',
-          durationMs: Date.now() - startTime,
-          totalCostUsd: 0,
-          numTurns: 0,
-          usage: { inputTokens: 0, outputTokens: 0 },
-        };
-      }
+      const result: AgentResult = {
+        success: run.exitCode === 0,
+        result: finalResult,
+        error: run.exitCode !== 0 ? (stderr || 'Unknown error') : undefined,
+        durationMs: Date.now() - startTime,
+        totalCostUsd: calculateCost(totalInputTokens, totalOutputTokens),
+        numTurns,
+        usage: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+        },
+      };
 
-      await agentStore.setSessionResult(sessionId, agentResult);
-      await agentStore.updateSessionStatus(sessionId, agentResult.success ? 'completed' : 'error');
-      return agentResult;
+      await agentStore.setSessionResult(sessionId, result);
+      await agentStore.updateSessionStatus(sessionId, result.success ? 'completed' : 'error');
+      return result;
 
     } finally {
-      // Always destroy the sandbox
-      await sandbox.destroy();
+      // Always stop the sandbox
+      await sandbox.stop();
     }
 
   } catch (error) {
@@ -205,86 +254,6 @@ runAgent().catch(err => {
     await agentStore.updateSessionStatus(sessionId, 'error');
     return errorResult;
   }
-}
-
-/**
- * Process SDK message and convert to AgentMessage
- */
-async function processSDKMessage(
-  message: Record<string, unknown>,
-  sessionId: string,
-  onMessage?: MessageCallback
-): Promise<AgentMessage | null> {
-  const type = message.type as string;
-
-  switch (type) {
-    case 'assistant': {
-      const content = (message.message as Record<string, unknown>)?.content as Array<{ type: string; text?: string; name?: string; input?: unknown }>;
-      let textContent = '';
-
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === 'text') {
-            textContent += block.text || '';
-          } else if (block.type === 'tool_use') {
-            // Add tool use message
-            const toolMessage = await agentStore.addMessage(sessionId, {
-              type: 'tool_use',
-              content: `Using tool: ${block.name}`,
-              toolName: block.name,
-              toolInput: block.input as Record<string, unknown>,
-            });
-            onMessage?.(toolMessage);
-          }
-        }
-      }
-
-      if (textContent) {
-        const assistantMessage = await agentStore.addMessage(sessionId, {
-          type: 'assistant',
-          content: textContent,
-        });
-        onMessage?.(assistantMessage);
-        return assistantMessage;
-      }
-      break;
-    }
-
-    case 'user': {
-      // Tool results come as user messages
-      const content = (message.message as Record<string, unknown>)?.content;
-      if (Array.isArray(content)) {
-        for (const block of content as Array<{ type: string; content?: unknown; tool_use_id?: string }>) {
-          if (block.type === 'tool_result') {
-            const toolResultContent = typeof block.content === 'string' 
-              ? block.content 
-              : JSON.stringify(block.content);
-
-            const toolResultMessage = await agentStore.addMessage(sessionId, {
-              type: 'tool_result',
-              content: toolResultContent.substring(0, 500) + (toolResultContent.length > 500 ? '...' : ''),
-              toolResult: block.content as string,
-              parentToolUseId: block.tool_use_id,
-            });
-            onMessage?.(toolResultMessage);
-            return toolResultMessage;
-          }
-        }
-      }
-      break;
-    }
-
-    case 'system': {
-      const systemMessage = await agentStore.addMessage(sessionId, {
-        type: 'system',
-        content: `System: ${(message as Record<string, unknown>).subtype || 'message'}`,
-      });
-      onMessage?.(systemMessage);
-      return systemMessage;
-    }
-  }
-
-  return null;
 }
 
 function calculateCost(inputTokens: number, outputTokens: number): number {
