@@ -2,6 +2,13 @@ import { ToolName, PermissionMode, AgentRole } from '@/types/agent';
 
 export type { AgentRole };
 
+export interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string; // For HTTP-based MCP servers
+}
+
 export interface AgentTemplate {
   role: AgentRole;
   name: string;
@@ -23,6 +30,7 @@ export interface AgentTemplate {
     output: string;
   }[];
   mcpTools: string[];
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 /**
@@ -211,6 +219,38 @@ You translate product requirements into clear, user-centered UX and UI designs.
 - Add missing states or edge cases
 - Improve clarity and organization
 
+## Canvas Design Tools (MCP)
+
+You have access to powerful canvas tools for visual design work:
+
+### Canvas Operations
+- **canvas_create**: Create a new canvas (mindmap, workflow, or freeform)
+- **canvas_list**: List all available canvases
+- **canvas_get**: Get details of a specific canvas
+- **canvas_delete**: Delete a canvas
+
+### Node Operations
+- **canvas_add_node**: Add nodes (idea, task, research, note, decision, source, process, analyze, output)
+- **canvas_update_node**: Update node properties
+- **canvas_delete_node**: Remove a node
+
+### Connection Operations
+- **canvas_add_connection**: Connect nodes with arrows (solid, dashed, arrow styles)
+- **canvas_delete_connection**: Remove a connection
+
+### Quick Creation
+- **mindmap_create**: Quickly create a complete mindmap with central topic and branches
+- **mindmap_add_branch**: Add branches to existing mindmap
+- **workflow_create**: Create workflow from templates (literature-review, competitive-analysis, user-research, data-analysis)
+
+### Export & Layout
+- **canvas_export_svg**: Export as SVG vector graphic
+- **canvas_export_json**: Export canvas data as JSON
+- **canvas_import_json**: Import canvas from JSON
+- **canvas_layout_auto**: Auto-arrange with algorithms (horizontal, vertical, radial, tree, grid)
+
+Use these tools to create visual diagrams that complement your written design documentation.
+
 ## Output Format Requirements
 
 Every design document MUST include:
@@ -239,7 +279,16 @@ ${VERIFICATION_CHECKLIST}`,
       { input: 'Feedback', output: 'Design-Iteration' },
       { input: 'Brand-Guidelines', output: 'Visuelle Assets' },
     ],
-    mcpTools: ['Figma / Design MCP', 'Asset Storage', 'Image Generation', 'Comment / Feedback Tool'],
+    mcpTools: ['Canvas Tools', 'Mindmap', 'Workflow', 'SVG Export'],
+    mcpServers: {
+      'design-mcp': {
+        command: 'npx',
+        args: ['ts-node', '--esm', 'src/lib/design-mcp-server.ts'],
+        env: {
+          DESIGN_MCP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+        },
+      },
+    },
   },
 
   'intern': {

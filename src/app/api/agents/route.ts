@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
       permissionMode: body.permissionMode,
       maxTurns: body.maxTurns,
       systemPrompt: body.systemPrompt,
+      mcpServers: body.mcpServers,
+      enableReplicate: body.enableReplicate,
     });
 
     return NextResponse.json(agent, { status: 201 });

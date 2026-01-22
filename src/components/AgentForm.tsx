@@ -1,23 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { ToolName, PermissionMode, AgentRole } from '@/types/agent';
-import { AGENT_TEMPLATES, AgentTemplate, getAllTemplates } from '@/lib/agent-templates';
+import { ToolName, PermissionMode, AgentRole, McpServerConfig, CreateAgentRequest } from '@/types/agent';
+import { AGENT_TEMPLATES, AgentTemplate, getAllTemplates, McpServerConfig as TemplateMcpConfig } from '@/lib/agent-templates';
 
 const AVAILABLE_TOOLS: ToolName[] = [
   'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'NotebookEdit'
 ];
-
-interface CreateAgentRequest {
-  name: string;
-  role: AgentRole;
-  prompt: string;
-  allowedTools: ToolName[];
-  permissionMode: PermissionMode;
-  maxTurns?: number;
-  systemPrompt?: string;
-  enableReplicate?: boolean;
-}
 
 const PERMISSION_MODES: { value: PermissionMode; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'Standard permission behavior with prompts' },
@@ -46,6 +35,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
   const [maxTurns, setMaxTurns] = useState<number | undefined>();
   const [systemPrompt, setSystemPrompt] = useState('');
   const [enableReplicate, setEnableReplicate] = useState(false);
+  const [mcpServers, setMcpServers] = useState<Record<string, McpServerConfig> | undefined>(undefined);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +50,20 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
     setPermissionMode(template.permissionMode);
     setMaxTurns(template.maxTurns);
     setSystemPrompt(template.systemPrompt);
+    // Convert template MCP config to agent MCP config
+    if (template.mcpServers) {
+      const converted: Record<string, McpServerConfig> = {};
+      for (const [key, val] of Object.entries(template.mcpServers)) {
+        converted[key] = {
+          command: val.command || 'http',
+          args: val.args,
+          env: { ...val.env, ...(val.url ? { MCP_URL: val.url } : {}) },
+        };
+      }
+      setMcpServers(converted);
+    } else {
+      setMcpServers(undefined);
+    }
     setStep('configure');
   };
 
@@ -73,6 +77,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
     setPermissionMode('acceptEdits');
     setMaxTurns(undefined);
     setSystemPrompt('');
+    setMcpServers(undefined);
     setStep('configure');
   };
 
@@ -111,6 +116,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
         maxTurns: maxTurns || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
         enableReplicate,
+        mcpServers,
       });
       // Reset form on success
       setStep('template');
@@ -123,6 +129,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
       setMaxTurns(undefined);
       setSystemPrompt('');
       setEnableReplicate(false);
+      setMcpServers(undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent');
     }

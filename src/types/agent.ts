@@ -107,6 +107,8 @@ export interface CreateAgentRequest {
   permissionMode: PermissionMode;
   maxTurns?: number;
   systemPrompt?: string;
+  mcpServers?: Record<string, McpServerConfig>;
+  enableReplicate?: boolean;
 }
 
 export interface RunAgentRequest {
