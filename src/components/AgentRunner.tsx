@@ -14,10 +14,6 @@ import {
   ConversationContent,
   Message,
   MessageContent,
-  MessageTimestamp,
-  PromptInput,
-  PromptInputTextarea,
-  PromptInputSubmit,
   Suggestions,
   Suggestion,
   Loader,
@@ -29,8 +25,10 @@ import {
   ReasoningContent,
   ReasoningStep,
   type PromptInputMessage,
-  type MessageFrom,
 } from './ai-elements';
+
+// Local type for message from (ai-elements Message component uses UIMessage["role"] from 'ai' package)
+type MessageFrom = 'user' | 'assistant' | 'system';
 
 interface AgentRunnerProps {
   agent: AgentConfig;
@@ -285,7 +283,7 @@ export function AgentRunner({
         return 'system';
       case 'tool_use':
       case 'tool_result':
-        return 'tool';
+        return 'assistant'; // Tool messages shown as assistant
       default:
         return 'assistant';
     }
@@ -538,10 +536,10 @@ export function AgentRunner({
                         <Message key={message.id} from={from}>
                           <MessageContent>
                             <div className="whitespace-pre-wrap">{message.content}</div>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {formatTime(message.timestamp)}
+                            </span>
                           </MessageContent>
-                          <MessageTimestamp>
-                            {formatTime(message.timestamp)}
-                          </MessageTimestamp>
                         </Message>
                       );
                     })}

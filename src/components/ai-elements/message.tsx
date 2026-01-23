@@ -1,163 +1,340 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { cn } from '@/lib/utils';
+import { Button } from "@/components/ui/button";
+import {
+  ButtonGroup,
+  ButtonGroupText,
+} from "@/components/ui/button-group";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
+import type { UIMessage } from "ai";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
+import { createContext, memo, useContext, useEffect, useState } from "react";
+import { Streamdown } from "streamdown";
 
-export type MessageFrom = 'user' | 'assistant' | 'system' | 'tool';
+export type MessageProps = HTMLAttributes<HTMLDivElement> & {
+  from: UIMessage["role"];
+};
 
-interface MessageContextValue {
-  from: MessageFrom;
+export const Message = ({ className, from, ...props }: MessageProps) => (
+  <div
+    className={cn(
+      "group flex w-full max-w-[95%] flex-col gap-2",
+      from === "user" ? "is-user ml-auto justify-end" : "is-assistant",
+      className
+    )}
+    {...props}
+  />
+);
+
+export type MessageContentProps = HTMLAttributes<HTMLDivElement>;
+
+export const MessageContent = ({
+  children,
+  className,
+  ...props
+}: MessageContentProps) => (
+  <div
+    className={cn(
+      "is-user:dark flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      "group-[.is-assistant]:text-foreground",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </div>
+);
+
+export type MessageActionsProps = ComponentProps<"div">;
+
+export const MessageActions = ({
+  className,
+  children,
+  ...props
+}: MessageActionsProps) => (
+  <div className={cn("flex items-center gap-1", className)} {...props}>
+    {children}
+  </div>
+);
+
+export type MessageActionProps = ComponentProps<typeof Button> & {
+  tooltip?: string;
+  label?: string;
+};
+
+export const MessageAction = ({
+  tooltip,
+  children,
+  label,
+  variant = "ghost",
+  size = "icon-sm",
+  ...props
+}: MessageActionProps) => {
+  const button = (
+    <Button size={size} type="button" variant={variant} {...props}>
+      {children}
+      <span className="sr-only">{label || tooltip}</span>
+    </Button>
+  );
+
+  if (tooltip) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent>
+            <p>{tooltip}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return button;
+};
+
+interface MessageBranchContextType {
+  currentBranch: number;
+  totalBranches: number;
+  goToPrevious: () => void;
+  goToNext: () => void;
+  branches: ReactElement[];
+  setBranches: (branches: ReactElement[]) => void;
 }
 
-const MessageContext = React.createContext<MessageContextValue | null>(null);
+const MessageBranchContext = createContext<MessageBranchContextType | null>(
+  null
+);
 
-export function useMessage() {
-  const context = React.useContext(MessageContext);
+const useMessageBranch = () => {
+  const context = useContext(MessageBranchContext);
+
   if (!context) {
-    throw new Error('useMessage must be used within a Message');
+    throw new Error(
+      "MessageBranch components must be used within MessageBranch"
+    );
   }
+
   return context;
-}
+};
 
-export interface MessageProps extends React.ComponentProps<'div'> {
-  from: MessageFrom;
-  children: React.ReactNode;
-}
+export type MessageBranchProps = HTMLAttributes<HTMLDivElement> & {
+  defaultBranch?: number;
+  onBranchChange?: (branchIndex: number) => void;
+};
 
-export const Message = React.forwardRef<HTMLDivElement, MessageProps>(
-  ({ className, from, children, ...props }, ref) => {
-    const isUser = from === 'user';
+export const MessageBranch = ({
+  defaultBranch = 0,
+  onBranchChange,
+  className,
+  ...props
+}: MessageBranchProps) => {
+  const [currentBranch, setCurrentBranch] = useState(defaultBranch);
+  const [branches, setBranches] = useState<ReactElement[]>([]);
 
-    return (
-      <MessageContext.Provider value={{ from }}>
-        <div
-          ref={ref}
-          className={cn(
-            'flex gap-3 animate-in fade-in-0 slide-in-from-bottom-2 duration-300',
-            isUser ? 'flex-row-reverse' : 'flex-row',
-            className
-          )}
-          {...props}
-        >
-          <MessageAvatar from={from} />
-          <div
-            className={cn(
-              'flex flex-col gap-1 max-w-[85%]',
-              isUser ? 'items-end' : 'items-start'
-            )}
-          >
-            {children}
-          </div>
-        </div>
-      </MessageContext.Provider>
-    );
-  }
-);
-Message.displayName = 'Message';
+  const handleBranchChange = (newBranch: number) => {
+    setCurrentBranch(newBranch);
+    onBranchChange?.(newBranch);
+  };
 
-export interface MessageAvatarProps extends React.ComponentProps<'div'> {
-  from: MessageFrom;
-}
+  const goToPrevious = () => {
+    const newBranch =
+      currentBranch > 0 ? currentBranch - 1 : branches.length - 1;
+    handleBranchChange(newBranch);
+  };
 
-export const MessageAvatar = React.forwardRef<HTMLDivElement, MessageAvatarProps>(
-  ({ className, from, ...props }, ref) => {
-    const avatarStyles = {
-      user: 'bg-gradient-to-br from-blue-500 to-blue-600 text-white',
-      assistant: 'bg-gradient-to-br from-violet-500 to-purple-600 text-white',
-      system: 'bg-gradient-to-br from-amber-500 to-orange-600 text-white',
-      tool: 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white',
-    };
+  const goToNext = () => {
+    const newBranch =
+      currentBranch < branches.length - 1 ? currentBranch + 1 : 0;
+    handleBranchChange(newBranch);
+  };
 
-    const icons = {
-      user: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-        </svg>
-      ),
-      assistant: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-      ),
-      system: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-      tool: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      ),
-    };
+  const contextValue: MessageBranchContextType = {
+    currentBranch,
+    totalBranches: branches.length,
+    goToPrevious,
+    goToNext,
+    branches,
+    setBranches,
+  };
 
-    return (
+  return (
+    <MessageBranchContext.Provider value={contextValue}>
       <div
-        ref={ref}
-        className={cn(
-          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm',
-          avatarStyles[from],
-          className
-        )}
+        className={cn("grid w-full gap-2 [&>div]:pb-0", className)}
         {...props}
-      >
-        {icons[from]}
-      </div>
-    );
+      />
+    </MessageBranchContext.Provider>
+  );
+};
+
+export type MessageBranchContentProps = HTMLAttributes<HTMLDivElement>;
+
+export const MessageBranchContent = ({
+  children,
+  ...props
+}: MessageBranchContentProps) => {
+  const { currentBranch, setBranches, branches } = useMessageBranch();
+  const childrenArray = Array.isArray(children) ? children : [children];
+
+  // Use useEffect to update branches when they change
+  useEffect(() => {
+    if (branches.length !== childrenArray.length) {
+      setBranches(childrenArray);
+    }
+  }, [childrenArray, branches, setBranches]);
+
+  return childrenArray.map((branch, index) => (
+    <div
+      className={cn(
+        "grid gap-2 overflow-hidden [&>div]:pb-0",
+        index === currentBranch ? "block" : "hidden"
+      )}
+      key={branch.key}
+      {...props}
+    >
+      {branch}
+    </div>
+  ));
+};
+
+export type MessageBranchSelectorProps = HTMLAttributes<HTMLDivElement> & {
+  from: UIMessage["role"];
+};
+
+export const MessageBranchSelector = ({
+  className,
+  from,
+  ...props
+}: MessageBranchSelectorProps) => {
+  const { totalBranches } = useMessageBranch();
+
+  // Don't render if there's only one branch
+  if (totalBranches <= 1) {
+    return null;
   }
+
+  return (
+    <ButtonGroup
+      className="[&>*:not(:first-child)]:rounded-l-md [&>*:not(:last-child)]:rounded-r-md"
+      orientation="horizontal"
+      {...props}
+    />
+  );
+};
+
+export type MessageBranchPreviousProps = ComponentProps<typeof Button>;
+
+export const MessageBranchPrevious = ({
+  children,
+  ...props
+}: MessageBranchPreviousProps) => {
+  const { goToPrevious, totalBranches } = useMessageBranch();
+
+  return (
+    <Button
+      aria-label="Previous branch"
+      disabled={totalBranches <= 1}
+      onClick={goToPrevious}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <ChevronLeftIcon size={14} />}
+    </Button>
+  );
+};
+
+export type MessageBranchNextProps = ComponentProps<typeof Button>;
+
+export const MessageBranchNext = ({
+  children,
+  className,
+  ...props
+}: MessageBranchNextProps) => {
+  const { goToNext, totalBranches } = useMessageBranch();
+
+  return (
+    <Button
+      aria-label="Next branch"
+      disabled={totalBranches <= 1}
+      onClick={goToNext}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <ChevronRightIcon size={14} />}
+    </Button>
+  );
+};
+
+export type MessageBranchPageProps = HTMLAttributes<HTMLSpanElement>;
+
+export const MessageBranchPage = ({
+  className,
+  ...props
+}: MessageBranchPageProps) => {
+  const { currentBranch, totalBranches } = useMessageBranch();
+
+  return (
+    <ButtonGroupText
+      className={cn(
+        "border-none bg-transparent text-muted-foreground shadow-none",
+        className
+      )}
+      {...props}
+    >
+      {currentBranch + 1} of {totalBranches}
+    </ButtonGroupText>
+  );
+};
+
+export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+
+export const MessageResponse = memo(
+  ({ className, ...props }: MessageResponseProps) => (
+    <Streamdown
+      className={cn(
+        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        className
+      )}
+      plugins={{ code, mermaid, math, cjk }}
+      {...props}
+    />
+  ),
+  (prevProps, nextProps) => prevProps.children === nextProps.children
 );
-MessageAvatar.displayName = 'MessageAvatar';
 
-export interface MessageContentProps extends React.ComponentProps<'div'> {
-  children: React.ReactNode;
-}
+MessageResponse.displayName = "MessageResponse";
 
-export const MessageContent = React.forwardRef<HTMLDivElement, MessageContentProps>(
-  ({ className, children, ...props }, ref) => {
-    const { from } = useMessage();
-    const isUser = from === 'user';
+export type MessageToolbarProps = ComponentProps<"div">;
 
-    const contentStyles = {
-      user: 'bg-blue-600 text-white',
-      assistant: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100',
-      system: 'bg-amber-50 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100 border border-amber-200 dark:border-amber-800',
-      tool: 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100 border border-emerald-200 dark:border-emerald-800',
-    };
-
-    return (
-      <div
-        ref={ref}
-        className={cn(
-          'rounded-2xl px-4 py-3 text-sm leading-relaxed',
-          isUser ? 'rounded-br-md' : 'rounded-bl-md',
-          contentStyles[from],
-          className
-        )}
-        {...props}
-      >
-        {children}
-      </div>
-    );
-  }
+export const MessageToolbar = ({
+  className,
+  children,
+  ...props
+}: MessageToolbarProps) => (
+  <div
+    className={cn(
+      "mt-4 flex w-full items-center justify-between gap-4",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </div>
 );
-MessageContent.displayName = 'MessageContent';
-
-export interface MessageTimestampProps extends React.ComponentProps<'span'> {
-  children: React.ReactNode;
-}
-
-export const MessageTimestamp = React.forwardRef<HTMLSpanElement, MessageTimestampProps>(
-  ({ className, children, ...props }, ref) => {
-    return (
-      <span
-        ref={ref}
-        className={cn('text-xs text-zinc-500 dark:text-zinc-400 px-1', className)}
-        {...props}
-      >
-        {children}
-      </span>
-    );
-  }
-);
-MessageTimestamp.displayName = 'MessageTimestamp';
