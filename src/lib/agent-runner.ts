@@ -228,49 +228,171 @@ async function runAgentDirect(
   const hasMcpTools = config.allowedTools?.includes('MCP') || 
                       config.allowedTools?.some(t => t.startsWith('canvas_') || t.startsWith('mindmap_'));
 
-  // Define MCP tools if enabled
+  // Define MCP tools if enabled - comprehensive canvas/diagram tools
   const mcpTools = hasMcpTools ? [
+    // Mind Map Tools
     {
       name: 'mindmap_create',
-      description: 'Create a mind map from a list of topics. Returns a canvas ID.',
+      description: 'Create a visual mind map diagram with a central topic and branches. Perfect for brainstorming, planning, or visualizing hierarchical information. Returns a canvas ID that can be viewed.',
       input_schema: {
         type: 'object' as const,
         properties: {
-          name: { type: 'string', description: 'Name for the mind map' },
-          centralTopic: { type: 'string', description: 'The central topic of the mind map' },
+          name: { type: 'string', description: 'Name for the mind map (e.g., "Project Ideas", "Feature Planning")' },
+          centralTopic: { type: 'string', description: 'The main/central topic of the mind map' },
           branches: {
             type: 'array',
             items: { type: 'string' },
-            description: 'List of branches from the central topic',
+            description: 'List of branches/subtopics radiating from the central topic',
           },
         },
         required: ['name', 'centralTopic', 'branches'],
       },
     },
     {
+      name: 'mindmap_add_branch',
+      description: 'Add new sub-branches to an existing node in a mind map',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          canvasId: { type: 'string', description: 'The canvas ID of the mind map' },
+          parentNodeId: { type: 'string', description: 'The node ID to add branches to' },
+          branchTopics: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'List of new branch topics to add',
+          },
+        },
+        required: ['canvasId', 'parentNodeId', 'branchTopics'],
+      },
+    },
+    // Workflow Tools
+    {
+      name: 'workflow_create',
+      description: 'Create a workflow diagram showing sequential steps. Use for process flows, user journeys, or development pipelines.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          name: { type: 'string', description: 'Name for the workflow' },
+          template: { 
+            type: 'string', 
+            description: 'Template type: "research" (literature review workflow), "development" (code workflow), "design" (design process), or "custom" (provide your own steps)' 
+          },
+          customSteps: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Custom step names (required if template is "custom")',
+          },
+        },
+        required: ['name', 'template'],
+      },
+    },
+    // Canvas CRUD Tools
+    {
+      name: 'canvas_create',
+      description: 'Create a new empty canvas for building custom diagrams',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          name: { type: 'string', description: 'Name for the canvas' },
+          type: { 
+            type: 'string', 
+            description: 'Canvas type: "mindmap", "workflow", or "freeform"' 
+          },
+        },
+        required: ['name', 'type'],
+      },
+    },
+    {
       name: 'canvas_add_node',
-      description: 'Add a node to an existing canvas',
+      description: 'Add a node to an existing canvas. Use for building custom diagrams step by step.',
       input_schema: {
         type: 'object' as const,
         properties: {
           canvasId: { type: 'string', description: 'The canvas ID' },
-          text: { type: 'string', description: 'Text content for the node' },
-          x: { type: 'number', description: 'X position' },
-          y: { type: 'number', description: 'Y position' },
-          parentId: { type: 'string', description: 'Optional parent node ID for connections' },
+          nodeType: { 
+            type: 'string', 
+            description: 'Node type: "idea", "task", "research", "note", "decision", "source", "process", "analyze", or "output"' 
+          },
+          label: { type: 'string', description: 'Text label for the node' },
+          x: { type: 'number', description: 'X position (optional, auto-positioned if not provided)' },
+          y: { type: 'number', description: 'Y position (optional, auto-positioned if not provided)' },
         },
-        required: ['canvasId', 'text'],
+        required: ['canvasId', 'nodeType', 'label'],
+      },
+    },
+    {
+      name: 'canvas_add_connection',
+      description: 'Connect two nodes in a canvas with a line/arrow',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          canvasId: { type: 'string', description: 'The canvas ID' },
+          fromNodeId: { type: 'string', description: 'Source node ID' },
+          toNodeId: { type: 'string', description: 'Target node ID' },
+          label: { type: 'string', description: 'Optional label for the connection' },
+          style: { type: 'string', description: 'Line style: "solid", "dashed", or "arrow" (default)' },
+        },
+        required: ['canvasId', 'fromNodeId', 'toNodeId'],
+      },
+    },
+    // Canvas Query Tools
+    {
+      name: 'canvas_list',
+      description: 'List all existing canvases with their IDs and types',
+      input_schema: {
+        type: 'object' as const,
+        properties: {},
+        required: [],
       },
     },
     {
       name: 'canvas_get',
-      description: 'Get details of a canvas including all nodes',
+      description: 'Get detailed information about a canvas including all nodes and connections',
       input_schema: {
         type: 'object' as const,
         properties: {
           canvasId: { type: 'string', description: 'The canvas ID' },
         },
         required: ['canvasId'],
+      },
+    },
+    // Canvas Export Tools
+    {
+      name: 'canvas_export_svg',
+      description: 'Export a canvas as SVG vector graphics for sharing or embedding',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          canvasId: { type: 'string', description: 'The canvas ID' },
+        },
+        required: ['canvasId'],
+      },
+    },
+    {
+      name: 'canvas_export_json',
+      description: 'Export a canvas as JSON data for backup or transfer',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          canvasId: { type: 'string', description: 'The canvas ID' },
+        },
+        required: ['canvasId'],
+      },
+    },
+    // Layout Tools
+    {
+      name: 'canvas_layout_auto',
+      description: 'Automatically arrange nodes in a canvas using a layout algorithm',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          canvasId: { type: 'string', description: 'The canvas ID' },
+          algorithm: { 
+            type: 'string', 
+            description: 'Layout algorithm: "horizontal", "vertical", "grid", or "radial"' 
+          },
+        },
+        required: ['canvasId', 'algorithm'],
       },
     },
   ] : [];

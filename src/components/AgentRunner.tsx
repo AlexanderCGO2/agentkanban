@@ -6,6 +6,7 @@ import { AGENT_TEMPLATES } from '@/lib/agent-templates';
 import { OutputViewer } from './OutputViewer';
 import { useV0 } from '@/hooks/useV0';
 import { AgentFlowCanvas } from './AgentFlowCanvas';
+import { CanvasViewer, extractCanvasIdsFromMessages } from './CanvasViewer';
 
 // AI Elements imports
 import {
@@ -118,8 +119,21 @@ export function AgentRunner({
   const [prompt, setPrompt] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [showFlowView, setShowFlowView] = useState(false);
+  const [showCanvasView, setShowCanvasView] = useState(false);
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
   const [useV0Generation, setUseV0Generation] = useState(false);
+  
+  // Extract canvas IDs from messages
+  const canvasIds = useMemo(() => {
+    return extractCanvasIdsFromMessages(messages);
+  }, [messages]);
+  
+  // Auto-show canvas view when canvases are created
+  useEffect(() => {
+    if (canvasIds.length > 0 && !showCanvasView && !showPreview && !showFlowView) {
+      setShowCanvasView(true);
+    }
+  }, [canvasIds.length, showCanvasView, showPreview, showFlowView]);
   const template = AGENT_TEMPLATES[agent.role] || AGENT_TEMPLATES.custom;
 
   // v0 integration for design agent
@@ -299,7 +313,7 @@ export function AgentRunner({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
-      <div className={`flex h-[90vh] w-full ${(showPreview && previewContent) || showFlowView ? 'max-w-7xl' : 'max-w-4xl'} flex-col rounded-2xl bg-white shadow-2xl dark:bg-zinc-900 overflow-hidden animate-fade-in`}>
+      <div className={`flex h-[90vh] w-full ${(showPreview && previewContent) || showFlowView || showCanvasView ? 'max-w-7xl' : 'max-w-4xl'} flex-col rounded-2xl bg-white shadow-2xl dark:bg-zinc-900 overflow-hidden animate-fade-in`}>
         {/* Header */}
         <div className={`flex items-center justify-between border-b px-6 py-4 ${template.color.border} ${template.color.bg}`}>
           <div className="flex items-center gap-4">
@@ -335,7 +349,13 @@ export function AgentRunner({
             )}
             {/* Flow View Toggle */}
             <button
-              onClick={() => setShowFlowView(!showFlowView)}
+              onClick={() => {
+                setShowFlowView(!showFlowView);
+                if (!showFlowView) {
+                  setShowCanvasView(false);
+                  setShowPreview(false);
+                }
+              }}
               className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 showFlowView
                   ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
@@ -347,6 +367,33 @@ export function AgentRunner({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
               </svg>
               Flow
+            </button>
+            
+            {/* Canvas View Toggle */}
+            <button
+              onClick={() => {
+                setShowCanvasView(!showCanvasView);
+                if (!showCanvasView) {
+                  setShowFlowView(false);
+                  setShowPreview(false);
+                }
+              }}
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                showCanvasView
+                  ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300'
+                  : 'bg-white/50 text-zinc-600 hover:bg-white dark:bg-black/20 dark:text-zinc-400 dark:hover:bg-black/30'
+              }`}
+              title="Show agent-created diagrams"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+              Canvas
+              {canvasIds.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-violet-500 text-white rounded-full">
+                  {canvasIds.length}
+                </span>
+              )}
             </button>
             {canShowPreview && (
               <button
@@ -392,7 +439,7 @@ export function AgentRunner({
         {/* Main Content Area */}
         <div className="flex flex-1 overflow-hidden">
           {/* Chat Panel */}
-          <div className={`flex flex-col ${(showPreview && previewContent) || showFlowView ? 'w-1/2 border-r border-zinc-200 dark:border-zinc-700' : 'w-full'}`}>
+          <div className={`flex flex-col ${(showPreview && previewContent) || showFlowView || showCanvasView ? 'w-1/2 border-r border-zinc-200 dark:border-zinc-700' : 'w-full'}`}>
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {messages.length === 0 && !running && (
@@ -676,7 +723,7 @@ export function AgentRunner({
           </div>
 
           {/* Flow View Panel */}
-          {showFlowView && !showPreview && (
+          {showFlowView && !showPreview && !showCanvasView && (
             <div className="w-1/2 flex flex-col border-l border-zinc-200 dark:border-zinc-700">
               <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
@@ -690,6 +737,25 @@ export function AgentRunner({
               <AgentFlowCanvas 
                 messages={messages} 
                 running={running}
+                className="flex-1"
+              />
+            </div>
+          )}
+
+          {/* Canvas View Panel */}
+          {showCanvasView && !showPreview && !showFlowView && (
+            <div className="w-1/2 flex flex-col border-l border-zinc-200 dark:border-zinc-700">
+              <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                  </svg>
+                  Created Diagrams
+                </span>
+                <span className="text-xs text-zinc-500">{canvasIds.length} canvas{canvasIds.length !== 1 ? 'es' : ''}</span>
+              </div>
+              <CanvasViewer 
+                canvasIds={canvasIds}
                 className="flex-1"
               />
             </div>

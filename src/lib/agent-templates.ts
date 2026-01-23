@@ -262,8 +262,8 @@ Every design document MUST include:
 - **Accessibility**: WCAG compliance notes
 
 ${VERIFICATION_CHECKLIST}`,
-    defaultPrompt: 'Analyze the requirements and create comprehensive design documentation.',
-    allowedTools: ['Read', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+    defaultPrompt: 'Analyze the requirements and create comprehensive design documentation. Use canvas tools to create visual diagrams.',
+    allowedTools: ['Read', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'MCP', 'mindmap_create', 'mindmap_add_branch', 'workflow_create', 'canvas_create', 'canvas_add_node', 'canvas_add_connection', 'canvas_list', 'canvas_get', 'canvas_export_svg', 'canvas_export_json', 'canvas_layout_auto'],
     permissionMode: 'acceptEdits',
     maxTurns: 20,
     icon: '🎨',

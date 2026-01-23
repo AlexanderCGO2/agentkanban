@@ -12,10 +12,24 @@ export type ToolName =
   | 'Task'
   | 'NotebookEdit'
   | 'MCP'
+  // Canvas tools
   | 'canvas_create'
+  | 'canvas_delete'
   | 'canvas_add_node'
+  | 'canvas_update_node'
+  | 'canvas_delete_node'
+  | 'canvas_add_connection'
+  | 'canvas_delete_connection'
+  | 'canvas_list'
   | 'canvas_get'
-  | 'mindmap_create';
+  | 'canvas_export_svg'
+  | 'canvas_export_json'
+  | 'canvas_layout_auto'
+  // Mindmap tools
+  | 'mindmap_create'
+  | 'mindmap_add_branch'
+  // Workflow tools
+  | 'workflow_create';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
