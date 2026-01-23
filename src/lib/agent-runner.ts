@@ -11,7 +11,36 @@ import { agentStore } from './agent-store';
 export type MessageCallback = (message: AgentMessage) => void;
 
 // Cloudflare Worker URL - set via environment variable
-const CLOUDFLARE_AGENT_URL = process.env.CLOUDFLARE_AGENT_URL || 'https://agentkanban-worker.your-subdomain.workers.dev';
+const CLOUDFLARE_AGENT_URL = process.env.CLOUDFLARE_AGENT_URL || 'https://agentkanban-worker.alexander-53b.workers.dev';
+
+// Map frontend tool names to Cloudflare worker tool names
+const TOOL_NAME_MAP: Record<string, string> = {
+  'Read': 'read_file',
+  'Write': 'write_file',
+  'Edit': 'write_file',
+  'Bash': 'bash',
+  'Glob': 'list_files',
+  'Grep': 'list_files',
+  'WebSearch': 'web_search',
+  'WebFetch': 'web_search',
+  'Task': 'bash',
+  'NotebookEdit': 'write_file',
+  'MCP': 'canvas_list',
+  // Canvas tools pass through as-is
+  'canvas_create': 'canvas_create',
+  'canvas_list': 'canvas_list',
+  'canvas_get': 'canvas_get',
+  'canvas_add_node': 'canvas_add_node',
+  'mindmap_create': 'mindmap_create',
+  'workflow_create': 'workflow_create',
+  // Replicate tools
+  'replicate_run': 'replicate_run',
+  'replicate_search_models': 'replicate_search_models',
+};
+
+function mapToolNames(tools: string[]): string[] {
+  return tools.map(t => TOOL_NAME_MAP[t] || t).filter((v, i, a) => a.indexOf(v) === i);
+}
 
 /**
  * Build full prompt with agent context
@@ -50,13 +79,20 @@ export async function runAgent(
   const startTime = Date.now();
 
   try {
-    // Check if we should use Cloudflare or fallback
-    const useCloudflare = process.env.CLOUDFLARE_AGENT_URL && process.env.CLOUDFLARE_AGENT_URL.length > 0;
+    // Check if we should use Cloudflare or fallback to direct API
+    // Use direct API if DISABLE_CLOUDFLARE is set, otherwise use Cloudflare
+    const useCloudflare = process.env.DISABLE_CLOUDFLARE !== 'true';
 
     if (useCloudflare) {
-      return await runAgentCloudflare(config, sessionId, fullPrompt, startTime, onMessage);
+      try {
+        return await runAgentCloudflare(config, sessionId, fullPrompt, startTime, onMessage);
+      } catch (cloudflareError) {
+        console.error('Cloudflare worker failed, falling back to direct API:', cloudflareError);
+        // Fallback to direct Anthropic API if Cloudflare fails
+        return await runAgentDirect(config, sessionId, fullPrompt, startTime, onMessage);
+      }
     } else {
-      // Fallback to direct Anthropic API (simpler, works everywhere)
+      // Use direct Anthropic API
       return await runAgentDirect(config, sessionId, fullPrompt, startTime, onMessage);
     }
 
@@ -95,7 +131,7 @@ async function runAgentCloudflare(
     body: JSON.stringify({
       prompt: fullPrompt,
       systemPrompt: config.systemPrompt || 'You are a helpful AI assistant.',
-      allowedTools: config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep'],
+      allowedTools: mapToolNames(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep']),
       permissionMode: config.permissionMode || 'acceptEdits',
       maxTurns: config.maxTurns || 20,
       sessionId,

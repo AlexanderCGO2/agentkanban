@@ -3,14 +3,42 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
-# Sandbox binding - uses the claude-code template with pre-installed dependencies
+# Durable Objects for session state persistence
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AgentSession"]
+
+# R2 Bucket for file storage
+[[r2_buckets]]
+binding = "FILE_STORAGE"
+bucket_name = "agentkanban-files"
+
+# Queue for long-running tasks
+[[queues.producers]]
+queue = "agent-tasks"
+binding = "TASK_QUEUE"
+
+[[queues.consumers]]
+queue = "agent-tasks"
+max_batch_size = 1
+max_batch_timeout = 60
+
+# Optional sandbox binding (requires paid plan + enablement)
 [[sandbox]]
 binding = "SANDBOX"
 template = "claude-code"
 
-# Secrets (set via wrangler secret put)
-# ANTHROPIC_API_KEY = "..."
-
 # Environment variables
 [vars]
 ENVIRONMENT = "production"
+# Set CANVAS_MCP_URL to your Vercel app URL
+# CANVAS_MCP_URL = "https://your-app.vercel.app"
+
+# Secrets (set via wrangler secret put)
+# ANTHROPIC_API_KEY = "..."
+# REPLICATE_API_TOKEN = "..."
+# CANVAS_MCP_URL = "..." (can also be set as secret if preferred)

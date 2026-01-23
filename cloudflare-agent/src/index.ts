@@ -1,291 +1,332 @@
 /**
  * Cloudflare Agent Worker
- * 
- * Runs Claude Agent SDK in Cloudflare Sandbox when available,
- * or falls back to direct Anthropic API.
+ *
+ * Scalable agent execution with:
+ * - Durable Objects for session state persistence
+ * - R2 for file storage
+ * - Queues for long-running tasks
+ * - Extensible tool framework
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type { Env, AgentRequest, AgentError, QueuedTask, SessionConfig } from './types';
+export { AgentSession } from './session';
 
-interface Env {
-  ANTHROPIC_API_KEY: string;
-  ENVIRONMENT: string;
-  // Sandbox binding - may not be available on all accounts
-  SANDBOX?: {
-    create(): Promise<Sandbox>;
-  };
-}
-
-interface Sandbox {
-  exec(command: string, args?: string[], options?: ExecOptions): Promise<ExecResult>;
-  spawn(command: string, args?: string[], options?: ExecOptions): SpawnProcess;
-  writeFile(path: string, content: string): Promise<void>;
-  readFile(path: string): Promise<string>;
-  destroy(): Promise<void>;
-}
-
-interface ExecOptions {
-  cwd?: string;
-  env?: Record<string, string>;
-  timeout?: number;
-}
-
-interface ExecResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-interface SpawnProcess {
-  stdout: AsyncIterable<Uint8Array>;
-  stderr: AsyncIterable<Uint8Array>;
-  wait(): Promise<{ exitCode: number }>;
-}
-
-interface AgentRequest {
-  prompt: string;
-  systemPrompt?: string;
-  allowedTools?: string[];
-  permissionMode?: string;
-  maxTurns?: number;
-  sessionId?: string;
-}
-
-interface AgentMessage {
-  type: 'assistant' | 'tool_use' | 'tool_result' | 'system' | 'error' | 'done';
-  content?: string;
-  toolName?: string;
-  toolInput?: unknown;
-  toolResult?: unknown;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-  };
-}
+// CORS headers for all responses
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
-      });
+      return new Response(null, { headers: CORS_HEADERS });
     }
 
     const url = new URL(request.url);
 
-    // Health check
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ 
-        status: 'ok', 
-        env: env.ENVIRONMENT,
-        hasSandbox: !!env.SANDBOX,
-        mode: env.SANDBOX ? 'sandbox' : 'direct-api'
-      }), {
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
+    try {
+      // Health check
+      if (url.pathname === '/health') {
+        return Response.json(
+          {
+            status: 'ok',
+            env: env.ENVIRONMENT,
+            hasSandbox: !!env.SANDBOX,
+            hasDurableObjects: !!env.AGENT_SESSION,
+            hasR2: !!env.FILE_STORAGE,
+            hasQueues: !!env.TASK_QUEUE,
+            mode: env.SANDBOX ? 'sandbox' : 'direct-api',
+          },
+          { headers: CORS_HEADERS }
+        );
+      }
 
-    // Run agent endpoint
-    if (url.pathname === '/run' && request.method === 'POST') {
-      return handleRunAgent(request, env);
-    }
+      // === BACKWARD COMPATIBLE ENDPOINTS ===
 
-    // Stream agent endpoint (Server-Sent Events)
-    if (url.pathname === '/stream' && request.method === 'POST') {
-      return handleStreamAgent(request, env);
-    }
+      // Simple run endpoint (creates ephemeral session)
+      if (url.pathname === '/run' && request.method === 'POST') {
+        return handleRunAgent(request, env);
+      }
 
-    return new Response('Not Found', { status: 404 });
+      // Simple stream endpoint (creates ephemeral session)
+      if (url.pathname === '/stream' && request.method === 'POST') {
+        return handleStreamAgent(request, env);
+      }
+
+      // === NEW SESSION-BASED ENDPOINTS ===
+
+      // Create a new session
+      if (url.pathname === '/sessions' && request.method === 'POST') {
+        return handleCreateSession(request, env);
+      }
+
+      // Get session state
+      const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
+      if (sessionMatch && request.method === 'GET') {
+        return handleGetSession(sessionMatch[1], env);
+      }
+
+      // Run agent in existing session
+      const runMatch = url.pathname.match(/^\/sessions\/([^/]+)\/run$/);
+      if (runMatch && request.method === 'POST') {
+        return handleSessionRun(runMatch[1], request, env);
+      }
+
+      // Stream agent in existing session
+      const streamMatch = url.pathname.match(/^\/sessions\/([^/]+)\/stream$/);
+      if (streamMatch && request.method === 'POST') {
+        return handleSessionStream(streamMatch[1], request, env);
+      }
+
+      // List session files
+      const filesMatch = url.pathname.match(/^\/sessions\/([^/]+)\/files$/);
+      if (filesMatch && request.method === 'GET') {
+        return handleSessionFiles(filesMatch[1], env);
+      }
+
+      return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
+    } catch (error) {
+      console.error('Worker error:', error);
+
+      return Response.json(
+        { error: error instanceof Error ? error.message : 'Internal error' },
+        { status: 500, headers: CORS_HEADERS }
+      );
+    }
+  },
+
+  // Queue consumer for long-running tasks
+  async queue(
+    batch: MessageBatch<QueuedTask>,
+    env: Env
+  ): Promise<void> {
+    for (const message of batch.messages) {
+      const task = message.body;
+
+      if (task.type === 'agent_run') {
+        try {
+          // Get or create Durable Object for session
+          const id = env.AGENT_SESSION.idFromString(task.sessionId);
+          const stub = env.AGENT_SESSION.get(id);
+
+          // Initialize if needed and run
+          await stub.fetch(
+            new Request('http://internal/init', {
+              method: 'POST',
+              body: JSON.stringify(task.config),
+            })
+          );
+
+          await stub.fetch(
+            new Request('http://internal/run', {
+              method: 'POST',
+              body: JSON.stringify({ prompt: task.prompt }),
+            })
+          );
+
+          message.ack();
+        } catch (error) {
+          console.error('Queue task failed:', error);
+          message.retry();
+        }
+      }
+    }
   },
 };
 
+// === Handler implementations ===
+
+/**
+ * Backward compatible: Simple run (creates ephemeral session)
+ */
 async function handleRunAgent(request: Request, env: Env): Promise<Response> {
-  try {
-    const body: AgentRequest = await request.json();
-    const { prompt, systemPrompt, maxTurns } = body;
+  const body = (await request.json()) as AgentRequest;
 
-    if (!prompt) {
-      return new Response(JSON.stringify({ error: 'prompt is required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      });
-    }
-
-    // Use direct Anthropic API (Sandbox requires paid plan + enablement)
-    const result = await runAgentDirect(env, {
-      prompt,
-      systemPrompt: systemPrompt || 'You are a helpful AI assistant.',
-      maxTurns: maxTurns || 10,
-    });
-
-    return new Response(JSON.stringify(result), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
-
-  } catch (error) {
-    console.error('Agent error:', error);
-    return new Response(JSON.stringify({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
+  if (!body.prompt) {
+    return Response.json({ error: 'prompt is required' }, { status: 400, headers: CORS_HEADERS });
   }
+
+  // Create ephemeral session
+  const sessionId = body.sessionId || crypto.randomUUID();
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
+
+  // Initialize session
+  await stub.fetch(
+    new Request('http://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({
+        systemPrompt: body.systemPrompt,
+        allowedTools: body.allowedTools,
+        permissionMode: body.permissionMode,
+        maxTurns: body.maxTurns,
+      }),
+    })
+  );
+
+  // Run agent
+  const response = await stub.fetch(
+    new Request('http://internal/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: body.prompt }),
+    })
+  );
+
+  const result = await response.json();
+  return Response.json(result, { headers: CORS_HEADERS });
 }
 
+/**
+ * Backward compatible: Simple stream (creates ephemeral session)
+ */
 async function handleStreamAgent(request: Request, env: Env): Promise<Response> {
-  const body: AgentRequest = await request.json();
-  const { prompt, systemPrompt, maxTurns } = body;
+  const body = (await request.json()) as AgentRequest;
 
-  if (!prompt) {
-    return new Response(JSON.stringify({ error: 'prompt is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    });
+  if (!body.prompt) {
+    return Response.json({ error: 'prompt is required' }, { status: 400, headers: CORS_HEADERS });
   }
 
-  // Create a TransformStream for SSE
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
+  // Create ephemeral session
+  const sessionId = body.sessionId || crypto.randomUUID();
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
 
-  // Process in background
-  (async () => {
-    try {
-      const anthropic = new Anthropic({
-        apiKey: env.ANTHROPIC_API_KEY,
-      });
+  // Initialize session
+  await stub.fetch(
+    new Request('http://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({
+        systemPrompt: body.systemPrompt,
+        allowedTools: body.allowedTools,
+        permissionMode: body.permissionMode,
+        maxTurns: body.maxTurns,
+      }),
+    })
+  );
 
-      let totalInputTokens = 0;
-      let totalOutputTokens = 0;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const messages: any[] = [{ role: 'user', content: prompt }];
+  // Stream agent
+  const response = await stub.fetch(
+    new Request('http://internal/stream', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: body.prompt }),
+    })
+  );
 
-      const maxIterations = maxTurns || 10;
-
-      for (let i = 0; i < maxIterations; i++) {
-        const response = await anthropic.messages.create({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 4096,
-          system: systemPrompt || 'You are a helpful AI assistant.',
-          messages,
-        });
-
-        totalInputTokens += response.usage.input_tokens;
-        totalOutputTokens += response.usage.output_tokens;
-
-        // Process response
-        for (const block of response.content) {
-          if (block.type === 'text') {
-            await writer.write(encoder.encode(`data: ${JSON.stringify({
-              type: 'assistant',
-              content: block.text,
-            })}\n\n`));
-          }
-        }
-
-        // Add to history
-        messages.push({ role: 'assistant', content: response.content });
-
-        // Check if done
-        if (response.stop_reason === 'end_turn') {
-          break;
-        }
-      }
-
-      // Send done message
-      await writer.write(encoder.encode(`data: ${JSON.stringify({
-        type: 'done',
-        usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
-      })}\n\n`));
-
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: errorMsg })}\n\n`));
-    } finally {
-      await writer.close();
-    }
-  })();
-
-  return new Response(readable, {
+  return new Response(response.body, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      ...CORS_HEADERS,
     },
   });
 }
 
-async function runAgentDirect(
-  env: Env,
-  config: { prompt: string; systemPrompt: string; maxTurns: number }
-): Promise<{
-  success: boolean;
-  result?: string;
-  messages: AgentMessage[];
-  usage: { inputTokens: number; outputTokens: number };
-  error?: string;
-}> {
-  const anthropic = new Anthropic({
-    apiKey: env.ANTHROPIC_API_KEY,
-  });
+/**
+ * Create a new persistent session
+ */
+async function handleCreateSession(request: Request, env: Env): Promise<Response> {
+  const body = (await request.json()) as Partial<AgentRequest>;
 
-  const messages: AgentMessage[] = [];
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let finalResult = '';
+  const sessionId = crypto.randomUUID();
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const conversationHistory: any[] = [{ role: 'user', content: config.prompt }];
+  const response = await stub.fetch(
+    new Request('http://internal/init', {
+      method: 'POST',
+      body: JSON.stringify({
+        systemPrompt: body.systemPrompt,
+        allowedTools: body.allowedTools,
+        permissionMode: body.permissionMode,
+        maxTurns: body.maxTurns,
+      }),
+    })
+  );
 
-  for (let i = 0; i < config.maxTurns; i++) {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      system: config.systemPrompt,
-      messages: conversationHistory,
-    });
+  const state = await response.json() as Record<string, unknown>;
+  return Response.json({ sessionId, ...state }, { headers: CORS_HEADERS });
+}
 
-    totalInputTokens += response.usage.input_tokens;
-    totalOutputTokens += response.usage.output_tokens;
+/**
+ * Get session state
+ */
+async function handleGetSession(sessionId: string, env: Env): Promise<Response> {
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
 
-    // Process response
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        finalResult = block.text;
-        messages.push({ type: 'assistant', content: block.text });
-      }
-    }
+  const response = await stub.fetch(new Request('http://internal/state'));
+  const state = await response.json();
 
-    // Add to history
-    conversationHistory.push({ role: 'assistant', content: response.content });
+  return Response.json(state, { headers: CORS_HEADERS });
+}
 
-    // Check if done
-    if (response.stop_reason === 'end_turn') {
-      break;
-    }
+/**
+ * Run agent in existing session
+ */
+async function handleSessionRun(sessionId: string, request: Request, env: Env): Promise<Response> {
+  const body = (await request.json()) as { prompt: string };
+
+  if (!body.prompt) {
+    return Response.json({ error: 'prompt is required' }, { status: 400, headers: CORS_HEADERS });
   }
 
-  return {
-    success: true,
-    result: finalResult,
-    messages,
-    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
-  };
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
+
+  const response = await stub.fetch(
+    new Request('http://internal/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: body.prompt }),
+    })
+  );
+
+  const result = await response.json();
+  return Response.json(result, { headers: CORS_HEADERS });
+}
+
+/**
+ * Stream agent in existing session
+ */
+async function handleSessionStream(sessionId: string, request: Request, env: Env): Promise<Response> {
+  const body = (await request.json()) as { prompt: string };
+
+  if (!body.prompt) {
+    return Response.json({ error: 'prompt is required' }, { status: 400, headers: CORS_HEADERS });
+  }
+
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
+
+  const response = await stub.fetch(
+    new Request('http://internal/stream', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: body.prompt }),
+    })
+  );
+
+  return new Response(response.body, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+/**
+ * List session files
+ */
+async function handleSessionFiles(sessionId: string, env: Env): Promise<Response> {
+  const id = env.AGENT_SESSION.idFromName(sessionId);
+  const stub = env.AGENT_SESSION.get(id);
+
+  const response = await stub.fetch(new Request('http://internal/files'));
+  const files = await response.json();
+
+  return Response.json(files, { headers: CORS_HEADERS });
 }
