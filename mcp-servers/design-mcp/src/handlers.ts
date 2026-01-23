@@ -2,7 +2,7 @@ import type { CanvasData, CanvasNode, CanvasConnection, McpToolCallResponse, Env
 import { WORKFLOW_TEMPLATES } from './templates';
 
 // Node color schemes
-const NODE_COLORS: Record<NodeType, { bg: string; border: string }> = {
+const NODE_COLORS: Record<NodeType | 'image', { bg: string; border: string }> = {
   idea: { bg: '#fef3c7', border: '#f59e0b' },
   task: { bg: '#dbeafe', border: '#3b82f6' },
   research: { bg: '#ede9fe', border: '#8b5cf6' },
@@ -12,6 +12,7 @@ const NODE_COLORS: Record<NodeType, { bg: string; border: string }> = {
   process: { bg: '#f3e8ff', border: '#a855f7' },
   analyze: { bg: '#fef9c3', border: '#eab308' },
   output: { bg: '#d1fae5', border: '#10b981' },
+  image: { bg: '#18181b', border: '#6366f1' },
 };
 
 // Helper to generate UUIDs
@@ -91,7 +92,44 @@ export async function handleCanvasDelete(
 }
 
 export async function handleCanvasAddNode(
-  args: { canvasId: string; nodeType: NodeType; label: string; x?: number; y?: number },
+  args: { canvasId: string; nodeType: NodeType | 'image'; label: string; x?: number; y?: number; width?: number; height?: number; imageUrl?: string },
+  env: Env
+): Promise<McpToolCallResponse> {
+  const canvas = await getCanvas(env, args.canvasId);
+  if (!canvas) {
+    return {
+      content: [{ type: 'text', text: `❌ Canvas not found: ${args.canvasId}` }],
+      isError: true,
+    };
+  }
+
+  const nodeId = uuid();
+  const isImageNode = args.nodeType === 'image' || args.imageUrl;
+  const node: CanvasNode = {
+    id: nodeId,
+    type: args.nodeType as NodeType,
+    label: args.label,
+    x: args.x ?? (canvas.nodes.length % 4) * 200 + 100,
+    y: args.y ?? Math.floor(canvas.nodes.length / 4) * 120 + 100,
+    width: args.width ?? (isImageNode ? 200 : 160),
+    height: args.height ?? (isImageNode ? 200 : 80),
+    imageUrl: args.imageUrl,
+  };
+
+  canvas.nodes.push(node);
+  canvas.updatedAt = new Date().toISOString();
+  await saveCanvas(env, canvas);
+
+  return {
+    content: [{
+      type: 'text',
+      text: `✅ Added ${args.nodeType} node "${args.label}"${args.imageUrl ? ' with image' : ''}\n\nNode ID: ${nodeId}\nPosition: (${node.x}, ${node.y})${args.imageUrl ? `\nImage: ${args.imageUrl}` : ''}`,
+    }],
+  };
+}
+
+export async function handleCanvasAddImage(
+  args: { canvasId: string; imageUrl: string; label?: string; x?: number; y?: number; width?: number; height?: number },
   env: Env
 ): Promise<McpToolCallResponse> {
   const canvas = await getCanvas(env, args.canvasId);
@@ -105,12 +143,13 @@ export async function handleCanvasAddNode(
   const nodeId = uuid();
   const node: CanvasNode = {
     id: nodeId,
-    type: args.nodeType,
-    label: args.label,
-    x: args.x ?? (canvas.nodes.length % 4) * 200 + 100,
-    y: args.y ?? Math.floor(canvas.nodes.length / 4) * 120 + 100,
-    width: 160,
-    height: 80,
+    type: 'image' as NodeType,
+    label: args.label || 'Image',
+    x: args.x ?? (canvas.nodes.length % 3) * 220 + 100,
+    y: args.y ?? Math.floor(canvas.nodes.length / 3) * 220 + 100,
+    width: args.width ?? 200,
+    height: args.height ?? 200,
+    imageUrl: args.imageUrl,
   };
 
   canvas.nodes.push(node);
@@ -120,7 +159,7 @@ export async function handleCanvasAddNode(
   return {
     content: [{
       type: 'text',
-      text: `✅ Added ${args.nodeType} node "${args.label}"\n\nNode ID: ${nodeId}\nPosition: (${node.x}, ${node.y})`,
+      text: `✅ Added image to canvas\n\nNode ID: ${nodeId}\nLabel: ${node.label}\nPosition: (${node.x}, ${node.y})\nSize: ${node.width}x${node.height}\nImage URL: ${args.imageUrl}`,
     }],
   };
 }

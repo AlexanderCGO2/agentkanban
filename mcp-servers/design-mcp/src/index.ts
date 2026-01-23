@@ -25,6 +25,7 @@ import {
   handleCanvasCreate,
   handleCanvasDelete,
   handleCanvasAddNode,
+  handleCanvasAddImage,
   handleCanvasUpdateNode,
   handleCanvasDeleteNode,
   handleCanvasAddConnection,
@@ -102,7 +103,10 @@ app.post('/mcp/tools/call', async (c) => {
       
       case 'canvas_add_node':
         return c.json(await handleCanvasAddNode(args as Parameters<typeof handleCanvasAddNode>[0], c.env));
-      
+
+      case 'canvas_add_image':
+        return c.json(await handleCanvasAddImage(args as Parameters<typeof handleCanvasAddImage>[0], c.env));
+
       case 'canvas_update_node':
         return c.json(await handleCanvasUpdateNode(args as Parameters<typeof handleCanvasUpdateNode>[0], c.env));
       

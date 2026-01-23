@@ -1,6 +1,6 @@
 // Canvas Data Types
 
-export type NodeType = 'idea' | 'task' | 'research' | 'note' | 'decision' | 'source' | 'process' | 'analyze' | 'output';
+export type NodeType = 'idea' | 'task' | 'research' | 'note' | 'decision' | 'source' | 'process' | 'analyze' | 'output' | 'image';
 export type CanvasType = 'mindmap' | 'workflow' | 'freeform';
 export type ConnectionStyle = 'solid' | 'dashed' | 'arrow';
 
@@ -13,6 +13,8 @@ export interface CanvasNode {
   width: number;
   height: number;
   color?: string;
+  imageUrl?: string;
+  imageData?: string; // Base64 encoded image data
   metadata?: Record<string, unknown>;
 }
 

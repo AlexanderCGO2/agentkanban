@@ -30,21 +30,41 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: 'canvas_add_node',
-    description: 'Add a node to an existing canvas. Nodes can represent ideas, tasks, research items, notes, or decisions.',
+    description: 'Add a node to an existing canvas. Nodes can represent ideas, tasks, research items, notes, decisions, or images.',
     inputSchema: {
       type: 'object',
       properties: {
         canvasId: { type: 'string', description: 'ID of the canvas' },
-        nodeType: { 
-          type: 'string', 
-          enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output'],
+        nodeType: {
+          type: 'string',
+          enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output', 'image'],
           description: 'Type of node to add'
         },
         label: { type: 'string', description: 'Label/text for the node' },
         x: { type: 'number', description: 'X position (optional, auto-positioned if not provided)' },
         y: { type: 'number', description: 'Y position (optional, auto-positioned if not provided)' },
+        width: { type: 'number', description: 'Width of the node (optional, defaults to 120 or 200 for images)' },
+        height: { type: 'number', description: 'Height of the node (optional, defaults to 60 or 200 for images)' },
+        imageUrl: { type: 'string', description: 'URL of an image to display in the node (for image nodes)' },
       },
       required: ['canvasId', 'nodeType', 'label'],
+    },
+  },
+  {
+    name: 'canvas_add_image',
+    description: 'Add an image node to a canvas. Perfect for displaying AI-generated images from Replicate or other sources.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        canvasId: { type: 'string', description: 'ID of the canvas' },
+        imageUrl: { type: 'string', description: 'URL of the image to display' },
+        label: { type: 'string', description: 'Caption/label for the image (optional)' },
+        x: { type: 'number', description: 'X position (optional, auto-positioned if not provided)' },
+        y: { type: 'number', description: 'Y position (optional, auto-positioned if not provided)' },
+        width: { type: 'number', description: 'Width of the image node (default: 200)' },
+        height: { type: 'number', description: 'Height of the image node (default: 200)' },
+      },
+      required: ['canvasId', 'imageUrl'],
     },
   },
   {
