@@ -51,15 +51,24 @@ const NODE_COLORS: Record<string, { bg: string; border: string; text: string }> 
 
 /**
  * CanvasViewer - Displays canvases created by agents
- * Fetches canvas data and renders it visually
+ * Fetches canvas data and renders it visually with zoom and pan support
  */
 export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanvasSelect }: CanvasViewerProps) {
   const [canvases, setCanvases] = useState<CanvasData[]>([]);
   const [selectedCanvas, setSelectedCanvas] = useState<string | null>(canvasId || null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fullscreenRef = useRef<HTMLDivElement>(null);
 
   // Fetch canvases
   const fetchCanvases = useCallback(async () => {
@@ -69,7 +78,7 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
     try {
       // If specific IDs provided, fetch them
       const idsToFetch = canvasId ? [canvasId] : canvasIds;
-      
+
       if (idsToFetch.length > 0) {
         const results = await Promise.all(
           idsToFetch.map(async (id) => {
@@ -107,12 +116,106 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
     }
   }, [canvases, selectedCanvas]);
 
+  // Reset zoom and pan when canvas changes
+  useEffect(() => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  }, [selectedCanvas]);
+
+  // Handle mouse wheel for zoom
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom(prev => Math.min(Math.max(prev * delta, 0.1), 5));
+  }, []);
+
+  // Handle mouse events for panning
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 0) { // Left click
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    }
+  }, [panOffset]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isPanning) {
+      setPanOffset({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      });
+    }
+  }, [isPanning, panStart]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  // Add wheel listener
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('wheel', handleWheel, { passive: false });
+      return () => container.removeEventListener('wheel', handleWheel);
+    }
+  }, [handleWheel]);
+
+  // Zoom controls
+  const zoomIn = () => setZoom(prev => Math.min(prev * 1.2, 5));
+  const zoomOut = () => setZoom(prev => Math.max(prev / 1.2, 0.1));
+  const resetZoom = () => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+  const fitToScreen = useCallback(() => {
+    const selectedCanvasData = canvases.find(c => c.id === selectedCanvas);
+    if (!selectedCanvasData || selectedCanvasData.nodes.length === 0) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const minX = Math.min(...selectedCanvasData.nodes.map(n => n.x));
+    const minY = Math.min(...selectedCanvasData.nodes.map(n => n.y));
+    const maxX = Math.max(...selectedCanvasData.nodes.map(n => n.x + n.width));
+    const maxY = Math.max(...selectedCanvasData.nodes.map(n => n.y + n.height));
+
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+
+    const padding = 80;
+    const scaleX = (container.clientWidth - padding) / contentWidth;
+    const scaleY = (container.clientHeight - padding) / contentHeight;
+    const newZoom = Math.min(scaleX, scaleY, 2);
+
+    setZoom(newZoom);
+    setPanOffset({ x: 0, y: 0 });
+  }, [canvases, selectedCanvas]);
+
+  // Fullscreen toggle
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      fullscreenRef.current?.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  }, []);
+
+  // Listen for fullscreen change
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
   // Render the selected canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     const selectedCanvasData = canvases.find(c => c.id === selectedCanvas);
-    
+
     if (!canvas || !container || !selectedCanvasData) return;
 
     const ctx = canvas.getContext('2d');
@@ -126,16 +229,17 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw grid
+    // Draw grid (fixed to canvas, not affected by zoom)
     ctx.strokeStyle = '#1f1f1f';
     ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += 30) {
+    const gridSize = 30;
+    for (let x = 0; x < canvas.width; x += gridSize) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, canvas.height);
       ctx.stroke();
     }
-    for (let y = 0; y < canvas.height; y += 30) {
+    for (let y = 0; y < canvas.height; y += gridSize) {
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(canvas.width, y);
@@ -155,27 +259,21 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
     const minY = Math.min(...selectedCanvasData.nodes.map(n => n.y));
     const maxX = Math.max(...selectedCanvasData.nodes.map(n => n.x + n.width));
     const maxY = Math.max(...selectedCanvasData.nodes.map(n => n.y + n.height));
-    
+
     const contentWidth = maxX - minX;
     const contentHeight = maxY - minY;
-    
-    // Calculate scale to fit
-    const padding = 40;
-    const scaleX = (canvas.width - padding * 2) / contentWidth;
-    const scaleY = (canvas.height - padding * 2) / contentHeight;
-    const scale = Math.min(scaleX, scaleY, 1);
-    
-    // Calculate offset to center
-    const offsetX = (canvas.width - contentWidth * scale) / 2 - minX * scale;
-    const offsetY = (canvas.height - contentHeight * scale) / 2 - minY * scale;
 
-    // Apply transform
+    // Calculate base offset to center content
+    const baseOffsetX = (canvas.width - contentWidth * zoom) / 2 - minX * zoom;
+    const baseOffsetY = (canvas.height - contentHeight * zoom) / 2 - minY * zoom;
+
+    // Apply transform with pan offset
     ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+    ctx.translate(baseOffsetX + panOffset.x, baseOffsetY + panOffset.y);
+    ctx.scale(zoom, zoom);
 
     // Draw connections
-    ctx.lineWidth = 2 / scale;
+    ctx.lineWidth = 2 / zoom;
     selectedCanvasData.connections.forEach(conn => {
       const fromNode = selectedCanvasData.nodes.find(n => n.id === conn.fromNodeId);
       const toNode = selectedCanvasData.nodes.find(n => n.id === conn.toNodeId);
@@ -204,7 +302,7 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
         const arrowLength = 12;
         const arrowX = toCenterX - (toNode.width / 2) * Math.cos(angle);
         const arrowY = toCenterY - (toNode.height / 2) * Math.sin(angle);
-        
+
         ctx.beginPath();
         ctx.moveTo(arrowX, arrowY);
         ctx.lineTo(
@@ -222,7 +320,7 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
       // Draw label if present
       if (conn.label) {
         ctx.fillStyle = '#9ca3af';
-        ctx.font = `${10 / scale}px system-ui`;
+        ctx.font = `${10}px system-ui`;
         ctx.textAlign = 'center';
         const midX = (fromCenterX + toCenterX) / 2;
         const midY = (fromCenterY + toCenterY) / 2;
@@ -239,7 +337,7 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
       // Node background
       ctx.fillStyle = colors.bg;
       ctx.strokeStyle = colors.border;
-      ctx.lineWidth = 2 / scale;
+      ctx.lineWidth = 2 / zoom;
 
       // Rounded rectangle
       const radius = 8;
@@ -262,12 +360,12 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
       ctx.font = `bold ${12}px system-ui`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      
+
       // Split label into lines
       const lines = node.label.split('\n');
       const lineHeight = 16;
       const startY = node.y + node.height / 2 - (lines.length - 1) * lineHeight / 2;
-      
+
       lines.forEach((line, i) => {
         // Truncate long lines
         const maxWidth = node.width - 16;
@@ -281,17 +379,17 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
 
     ctx.restore();
 
-    // Draw title
+    // Draw title (not affected by zoom/pan)
     ctx.fillStyle = '#f4f4f5';
     ctx.font = 'bold 14px system-ui';
     ctx.textAlign = 'left';
     ctx.fillText(selectedCanvasData.name, 12, 24);
-    
+
     ctx.fillStyle = '#71717a';
     ctx.font = '11px system-ui';
     ctx.fillText(`${selectedCanvasData.type} • ${selectedCanvasData.nodes.length} nodes`, 12, 42);
 
-  }, [selectedCanvas, canvases]);
+  }, [selectedCanvas, canvases, zoom, panOffset]);
 
   if (loading) {
     return (
@@ -334,7 +432,10 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
   }
 
   return (
-    <div className={`flex flex-col bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden ${className}`}>
+    <div
+      ref={fullscreenRef}
+      className={`flex flex-col bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''} ${className}`}
+    >
       {/* Canvas tabs if multiple canvases */}
       {canvases.length > 1 && (
         <div className="flex gap-1 p-2 bg-zinc-800/50 border-b border-zinc-700 overflow-x-auto">
@@ -356,11 +457,64 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
           ))}
         </div>
       )}
-      
+
       {/* Canvas render area */}
-      <div ref={containerRef} className="flex-1 relative min-h-[200px]">
+      <div
+        ref={containerRef}
+        className={`flex-1 relative ${isFullscreen ? 'min-h-0' : 'min-h-[200px]'}`}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+      >
         <canvas ref={canvasRef} className="block w-full h-full" />
-        
+
+        {/* Zoom indicator */}
+        <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-800/80 rounded text-xs text-zinc-400 backdrop-blur-sm">
+          {Math.round(zoom * 100)}%
+        </div>
+
+        {/* Zoom controls */}
+        <div className="absolute left-2 bottom-2 flex flex-col gap-1">
+          <button
+            onClick={zoomIn}
+            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg backdrop-blur-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Zoom in"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+            </svg>
+          </button>
+          <button
+            onClick={zoomOut}
+            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg backdrop-blur-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Zoom out"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+            </svg>
+          </button>
+          <button
+            onClick={fitToScreen}
+            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg backdrop-blur-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Fit to screen"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+            </svg>
+          </button>
+          <button
+            onClick={resetZoom}
+            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg backdrop-blur-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Reset (100%)"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+            </svg>
+          </button>
+        </div>
+
         {/* Action buttons */}
         <div className="absolute bottom-2 right-2 flex gap-2">
           <button
@@ -371,6 +525,21 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
+          </button>
+          <button
+            onClick={toggleFullscreen}
+            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg backdrop-blur-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          >
+            {isFullscreen ? (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              </svg>
+            )}
           </button>
           {selectedCanvas && (
             <a
@@ -386,6 +555,13 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
             </a>
           )}
         </div>
+
+        {/* Pan hint */}
+        {!isPanning && (
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-zinc-800/60 rounded-full text-xs text-zinc-500 backdrop-blur-sm pointer-events-none">
+            Drag to pan • Scroll to zoom
+          </div>
+        )}
       </div>
     </div>
   );
@@ -397,7 +573,7 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
 export function extractCanvasIdsFromMessages(messages: { content: string; type: string }[]): string[] {
   const canvasIdPattern = /Canvas ID:\s*([a-f0-9-]{36})/gi;
   const ids = new Set<string>();
-  
+
   for (const msg of messages) {
     if (msg.type === 'tool_result' || msg.type === 'assistant') {
       const matches = msg.content.matchAll(canvasIdPattern);
@@ -406,6 +582,6 @@ export function extractCanvasIdsFromMessages(messages: { content: string; type: 
       }
     }
   }
-  
+
   return Array.from(ids);
 }
