@@ -87,6 +87,12 @@ export default {
         return handleSessionFiles(filesMatch[1], env);
       }
 
+      // Get specific file from session
+      const fileMatch = url.pathname.match(/^\/sessions\/([^/]+)\/files\/(.+)$/);
+      if (fileMatch && request.method === 'GET') {
+        return handleGetFile(fileMatch[1], fileMatch[2], env);
+      }
+
       return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
     } catch (error) {
       console.error('Worker error:', error);
@@ -329,4 +335,54 @@ async function handleSessionFiles(sessionId: string, env: Env): Promise<Response
   const files = await response.json();
 
   return Response.json(files, { headers: CORS_HEADERS });
+}
+
+/**
+ * Get a specific file from session storage
+ */
+async function handleGetFile(sessionId: string, filePath: string, env: Env): Promise<Response> {
+  const r2Key = `sessions/${sessionId}/files/${filePath}`;
+
+  try {
+    const object = await env.FILE_STORAGE.get(r2Key);
+
+    if (!object) {
+      return new Response('File not found', { status: 404, headers: CORS_HEADERS });
+    }
+
+    // Determine content type from extension
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    const contentTypes: Record<string, string> = {
+      'html': 'text/html',
+      'htm': 'text/html',
+      'css': 'text/css',
+      'js': 'application/javascript',
+      'json': 'application/json',
+      'txt': 'text/plain',
+      'md': 'text/markdown',
+      'svg': 'image/svg+xml',
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'pdf': 'application/pdf',
+      'csv': 'text/csv',
+    };
+    const contentType = contentTypes[ext] || 'text/plain';
+
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=3600',
+        ...CORS_HEADERS,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching file:', error);
+    return Response.json(
+      { error: 'Failed to fetch file' },
+      { status: 500, headers: CORS_HEADERS }
+    );
+  }
 }

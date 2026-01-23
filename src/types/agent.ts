@@ -29,7 +29,11 @@ export type ToolName =
   | 'mindmap_create'
   | 'mindmap_add_branch'
   // Workflow tools
-  | 'workflow_create';
+  | 'workflow_create'
+  // Replicate AI tools
+  | 'replicate_run'
+  | 'replicate_search_models'
+  | 'replicate_get_model';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
