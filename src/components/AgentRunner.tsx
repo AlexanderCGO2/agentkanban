@@ -5,6 +5,7 @@ import { AgentConfig, AgentMessage, AgentResult, OutputFile } from '@/types/agen
 import { AGENT_TEMPLATES } from '@/lib/agent-templates';
 import { OutputViewer } from './OutputViewer';
 import { useV0 } from '@/hooks/useV0';
+import { AgentFlowCanvas } from './AgentFlowCanvas';
 
 // AI Elements imports
 import {
@@ -116,6 +117,7 @@ export function AgentRunner({
 }: AgentRunnerProps) {
   const [prompt, setPrompt] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+  const [showFlowView, setShowFlowView] = useState(false);
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
   const [useV0Generation, setUseV0Generation] = useState(false);
   const template = AGENT_TEMPLATES[agent.role] || AGENT_TEMPLATES.custom;
@@ -297,7 +299,7 @@ export function AgentRunner({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
-      <div className={`flex h-[90vh] w-full ${showPreview && previewContent ? 'max-w-7xl' : 'max-w-4xl'} flex-col rounded-2xl bg-white shadow-2xl dark:bg-zinc-900 overflow-hidden animate-fade-in`}>
+      <div className={`flex h-[90vh] w-full ${(showPreview && previewContent) || showFlowView ? 'max-w-7xl' : 'max-w-4xl'} flex-col rounded-2xl bg-white shadow-2xl dark:bg-zinc-900 overflow-hidden animate-fade-in`}>
         {/* Header */}
         <div className={`flex items-center justify-between border-b px-6 py-4 ${template.color.border} ${template.color.bg}`}>
           <div className="flex items-center gap-4">
@@ -331,6 +333,21 @@ export function AgentRunner({
                 v0
               </button>
             )}
+            {/* Flow View Toggle */}
+            <button
+              onClick={() => setShowFlowView(!showFlowView)}
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                showFlowView
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
+                  : 'bg-white/50 text-zinc-600 hover:bg-white dark:bg-black/20 dark:text-zinc-400 dark:hover:bg-black/30'
+              }`}
+              title="Show agent execution flow diagram"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+              </svg>
+              Flow
+            </button>
             {canShowPreview && (
               <button
                 onClick={() => setShowPreview(!showPreview)}
@@ -375,7 +392,7 @@ export function AgentRunner({
         {/* Main Content Area */}
         <div className="flex flex-1 overflow-hidden">
           {/* Chat Panel */}
-          <div className={`flex flex-col ${showPreview && previewContent ? 'w-1/2 border-r border-zinc-200 dark:border-zinc-700' : 'w-full'}`}>
+          <div className={`flex flex-col ${(showPreview && previewContent) || showFlowView ? 'w-1/2 border-r border-zinc-200 dark:border-zinc-700' : 'w-full'}`}>
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {messages.length === 0 && !running && (
@@ -601,18 +618,82 @@ export function AgentRunner({
               )}
             </div>
 
-            {/* Input with PromptInput component */}
+            {/* Input - uncontrolled form with ref */}
             <div className="border-t border-zinc-200 px-6 py-4 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
-              <PromptInput onSubmit={handleSubmit} disabled={running}>
-                <PromptInputTextarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const input = form.elements.namedItem('prompt') as HTMLTextAreaElement;
+                  const text = input?.value?.trim();
+                  if (!text || running) return;
+                  if (useV0Generation && canUseV0) {
+                    handleV0Generate(text);
+                    input.value = '';
+                    return;
+                  }
+                  onRun(text);
+                  input.value = '';
+                }}
+                className="relative flex items-end gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm transition-all focus-within:border-zinc-300 focus-within:shadow-md dark:border-zinc-700 dark:bg-zinc-800 dark:focus-within:border-zinc-600"
+              >
+                <textarea
+                  name="prompt"
+                  defaultValue=""
                   placeholder={getPlaceholder()}
+                  disabled={running}
+                  rows={1}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      e.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-zinc-900 placeholder-zinc-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-100 dark:placeholder-zinc-400 min-h-[36px] max-h-[200px]"
                 />
-                <PromptInputSubmit status={running ? 'streaming' : 'ready'} />
-              </PromptInput>
+                <button
+                  type="submit"
+                  disabled={running}
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all ${
+                    running
+                      ? 'bg-red-500 text-white hover:bg-red-600'
+                      : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-sm hover:shadow-md hover:brightness-110'
+                  } disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100`}
+                >
+                  {running ? (
+                    <svg className="h-4 w-4 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                </button>
+              </form>
             </div>
           </div>
+
+          {/* Flow View Panel */}
+          {showFlowView && !showPreview && (
+            <div className="w-1/2 flex flex-col border-l border-zinc-200 dark:border-zinc-700">
+              <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                  </svg>
+                  Agent Flow
+                </span>
+                <span className="text-xs text-zinc-500">{messages.length} steps</span>
+              </div>
+              <AgentFlowCanvas 
+                messages={messages} 
+                running={running}
+                className="flex-1"
+              />
+            </div>
+          )}
 
           {/* Preview Panel */}
           {showPreview && previewContent && (

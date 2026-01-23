@@ -93,6 +93,7 @@ export function useAgentRunner() {
   const [error, setError] = useState<string | null>(null);
 
   const runAgent = useCallback(async (agentId: string, prompt: string) => {
+    console.log('[useAgentRunner] runAgent called with agentId:', agentId, 'prompt:', prompt);
     setRunning(true);
     setMessages([]);
     setResult(null);
@@ -101,6 +102,7 @@ export function useAgentRunner() {
     setOutputFiles([]);
 
     try {
+      console.log('[useAgentRunner] Fetching /api/agents/' + agentId + '/stream');
       const response = await fetch(`/api/agents/${agentId}/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
