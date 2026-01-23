@@ -75,7 +75,9 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
           idsToFetch.map(async (id) => {
             const response = await fetch(`/api/design-mcp/canvases/${id}`);
             if (!response.ok) return null;
-            return response.json() as Promise<CanvasData>;
+            const data = await response.json();
+            // Handle both direct canvas and wrapped { canvas: ... } format
+            return (data.canvas || data) as CanvasData;
           })
         );
         setCanvases(results.filter((c): c is CanvasData => c !== null));
@@ -84,7 +86,8 @@ export function CanvasViewer({ canvasId, canvasIds = [], className = '', onCanva
         const response = await fetch('/api/design-mcp/canvases');
         if (!response.ok) throw new Error('Failed to fetch canvases');
         const data = await response.json();
-        setCanvases(data);
+        // Handle both array and wrapped format
+        setCanvases(Array.isArray(data) ? data : (data.canvases || []));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load canvases');
