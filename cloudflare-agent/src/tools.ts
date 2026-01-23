@@ -424,8 +424,18 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
     }
 
     try {
-      // Create prediction
-      const createRes = await fetch('https://api.replicate.com/v1/predictions', {
+      // Parse model identifier (owner/name or owner/name:version)
+      const [ownerName, version] = model.split(':');
+      const [owner, name] = ownerName.split('/');
+
+      if (!owner || !name) {
+        return 'Error: Invalid model format. Use "owner/name" (e.g., "black-forest-labs/flux-schnell")';
+      }
+
+      // Use the models endpoint which doesn't require version
+      const apiUrl = `https://api.replicate.com/v1/models/${owner}/${name}/predictions`;
+
+      const createRes = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiToken}`,
@@ -433,7 +443,6 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
           'Prefer': wait ? 'wait' : '',
         },
         body: JSON.stringify({
-          model,
           input: modelInput,
         }),
       });
@@ -457,6 +466,7 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
           id: prediction.id,
           status: prediction.status,
           output: prediction.output,
+          model: model,
         }, null, 2);
       }
 
@@ -478,6 +488,7 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
           status: result.status,
           output: result.output,
           error: result.error,
+          model: model,
         }, null, 2);
       }
 

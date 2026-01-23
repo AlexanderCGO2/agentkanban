@@ -118,6 +118,7 @@ export function AgentRunner({
   const [showPreview, setShowPreview] = useState(false);
   const [showFlowView, setShowFlowView] = useState(false);
   const [showCanvasView, setShowCanvasView] = useState(false);
+  const [showFilesView, setShowFilesView] = useState(false);
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
   const [useV0Generation, setUseV0Generation] = useState(false);
   
@@ -128,10 +129,17 @@ export function AgentRunner({
   
   // Auto-show canvas view when canvases are created
   useEffect(() => {
-    if (canvasIds.length > 0 && !showCanvasView && !showPreview && !showFlowView) {
+    if (canvasIds.length > 0 && !showCanvasView && !showPreview && !showFlowView && !showFilesView) {
       setShowCanvasView(true);
     }
-  }, [canvasIds.length, showCanvasView, showPreview, showFlowView]);
+  }, [canvasIds.length, showCanvasView, showPreview, showFlowView, showFilesView]);
+
+  // Auto-show files view when files are created
+  useEffect(() => {
+    if (outputFiles.length > 0 && !showFilesView && !showCanvasView && !showPreview && !showFlowView) {
+      setShowFilesView(true);
+    }
+  }, [outputFiles.length, showFilesView, showCanvasView, showPreview, showFlowView]);
   const template = AGENT_TEMPLATES[agent.role] || AGENT_TEMPLATES.custom;
 
   // v0 integration for design agent
@@ -311,7 +319,7 @@ export function AgentRunner({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4">
-      <div className={`flex h-[90vh] w-full ${(showPreview && previewContent) || showFlowView || showCanvasView ? 'max-w-7xl' : 'max-w-4xl'} flex-col rounded-2xl bg-white shadow-2xl dark:bg-zinc-900 overflow-hidden animate-fade-in`}>
+      <div className={`flex h-[90vh] w-full ${(showPreview && previewContent) || showFlowView || showCanvasView || showFilesView ? 'max-w-7xl' : 'max-w-4xl'} flex-col rounded-2xl bg-white shadow-2xl dark:bg-zinc-900 overflow-hidden animate-fade-in`}>
         {/* Header */}
         <div className={`flex items-center justify-between border-b px-6 py-4 ${template.color.border} ${template.color.bg}`}>
           <div className="flex items-center gap-4">
@@ -393,6 +401,33 @@ export function AgentRunner({
                 </span>
               )}
             </button>
+            {/* Files View Toggle */}
+            <button
+              onClick={() => {
+                setShowFilesView(!showFilesView);
+                if (!showFilesView) {
+                  setShowFlowView(false);
+                  setShowCanvasView(false);
+                  setShowPreview(false);
+                }
+              }}
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                showFilesView
+                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300'
+                  : 'bg-white/50 text-zinc-600 hover:bg-white dark:bg-black/20 dark:text-zinc-400 dark:hover:bg-black/30'
+              }`}
+              title="Show created files"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              Files
+              {outputFiles.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full">
+                  {outputFiles.length}
+                </span>
+              )}
+            </button>
             {canShowPreview && (
               <button
                 onClick={() => setShowPreview(!showPreview)}
@@ -437,7 +472,7 @@ export function AgentRunner({
         {/* Main Content Area */}
         <div className="flex flex-1 overflow-hidden">
           {/* Chat Panel */}
-          <div className={`flex flex-col ${(showPreview && previewContent) || showFlowView || showCanvasView ? 'w-1/2 border-r border-zinc-200 dark:border-zinc-700' : 'w-full'}`}>
+          <div className={`flex flex-col ${(showPreview && previewContent) || showFlowView || showCanvasView || showFilesView ? 'w-1/2 border-r border-zinc-200 dark:border-zinc-700' : 'w-full'}`}>
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {messages.length === 0 && !running && (
@@ -721,7 +756,7 @@ export function AgentRunner({
           </div>
 
           {/* Flow View Panel */}
-          {showFlowView && !showPreview && !showCanvasView && (
+          {showFlowView && !showPreview && !showCanvasView && !showFilesView && (
             <div className="w-1/2 flex flex-col border-l border-zinc-200 dark:border-zinc-700">
               <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
@@ -741,7 +776,7 @@ export function AgentRunner({
           )}
 
           {/* Canvas View Panel */}
-          {showCanvasView && !showPreview && !showFlowView && (
+          {showCanvasView && !showPreview && !showFlowView && !showFilesView && (
             <div className="w-1/2 flex flex-col border-l border-zinc-200 dark:border-zinc-700">
               <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
@@ -752,10 +787,91 @@ export function AgentRunner({
                 </span>
                 <span className="text-xs text-zinc-500">{canvasIds.length} canvas{canvasIds.length !== 1 ? 'es' : ''}</span>
               </div>
-              <CanvasViewer 
+              <CanvasViewer
                 canvasIds={canvasIds}
                 className="flex-1"
               />
+            </div>
+          )}
+
+          {/* Files View Panel */}
+          {showFilesView && !showPreview && !showFlowView && !showCanvasView && (
+            <div className="w-1/2 flex flex-col border-l border-zinc-200 dark:border-zinc-700">
+              <div className="flex items-center justify-between px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  Created Files
+                </span>
+                <span className="text-xs text-zinc-500">{outputFiles.length} file{outputFiles.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="flex-1 overflow-auto p-4 bg-zinc-900">
+                {outputFiles.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-zinc-500">
+                    <div className="text-center">
+                      <svg className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                      <p className="text-sm">No files created yet</p>
+                      <p className="text-xs mt-1 text-zinc-600">Files will appear here as the agent creates them</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {outputFiles.map((file, index) => (
+                      <div key={index} className="rounded-lg border border-zinc-700 bg-zinc-800 overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-zinc-700/50">
+                          <span className="text-sm font-mono text-zinc-200">{file.filename}</span>
+                          <div className="flex gap-2">
+                            {file.content && (
+                              <button
+                                onClick={() => navigator.clipboard.writeText(file.content!)}
+                                className="p-1 text-zinc-400 hover:text-zinc-200 transition-colors"
+                                title="Copy content"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              </button>
+                            )}
+                            {file.url && (
+                              <a
+                                href={file.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1 text-zinc-400 hover:text-zinc-200 transition-colors"
+                                title="Open in new tab"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                        {file.content && (
+                          <pre className="p-3 text-xs text-zinc-300 overflow-x-auto max-h-48 overflow-y-auto">
+                            {file.content.slice(0, 2000)}
+                            {file.content.length > 2000 && '\n... (truncated)'}
+                          </pre>
+                        )}
+                        {file.url && !file.content && (
+                          <div className="p-3">
+                            {file.url.match(/\.(png|jpg|jpeg|gif|webp|svg)$/i) ? (
+                              <img src={file.url} alt={file.filename} className="max-w-full h-auto rounded" />
+                            ) : (
+                              <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 text-sm">
+                                {file.url}
+                              </a>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
