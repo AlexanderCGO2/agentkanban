@@ -342,6 +342,93 @@ const TOOL_DEFINITIONS: Record<ToolName, ToolDefinition> = {
 };
 
 // ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * Download files from Replicate output and store them in R2
+ * Returns array of stored file info with R2 URLs
+ */
+async function storeReplicateOutputToR2(
+  output: unknown,
+  predictionId: string,
+  context: ToolExecutionContext
+): Promise<Array<{ original: string; r2Url: string; path: string }>> {
+  const storedFiles: Array<{ original: string; r2Url: string; path: string }> = [];
+
+  // Extract URLs from output (can be string, array of strings, or object)
+  const urls: string[] = [];
+  if (typeof output === 'string' && output.startsWith('http')) {
+    urls.push(output);
+  } else if (Array.isArray(output)) {
+    for (const item of output) {
+      if (typeof item === 'string' && item.startsWith('http')) {
+        urls.push(item);
+      }
+    }
+  }
+
+  // Download and store each URL
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    try {
+      // Fetch the file
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`Failed to fetch ${url}: ${response.status}`);
+        continue;
+      }
+
+      // Determine file extension from URL or content-type
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      let ext = 'bin';
+      if (contentType.includes('image/png')) ext = 'png';
+      else if (contentType.includes('image/jpeg')) ext = 'jpg';
+      else if (contentType.includes('image/webp')) ext = 'webp';
+      else if (contentType.includes('image/gif')) ext = 'gif';
+      else if (contentType.includes('audio/')) ext = 'mp3';
+      else if (contentType.includes('video/')) ext = 'mp4';
+      else {
+        // Try to get extension from URL
+        const urlExt = url.split('.').pop()?.split('?')[0];
+        if (urlExt && urlExt.length <= 4) ext = urlExt;
+      }
+
+      // Create unique filename
+      const filename = `${predictionId}_${i}.${ext}`;
+      const filePath = `images/${filename}`;
+      const r2Key = `sessions/${context.sessionId}/files/${filePath}`;
+
+      // Store in R2
+      const arrayBuffer = await response.arrayBuffer();
+      await context.fileStorage.put(r2Key, arrayBuffer, {
+        httpMetadata: { contentType },
+        customMetadata: {
+          sessionId: context.sessionId,
+          predictionId,
+          originalUrl: url,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      // Build the R2-backed URL (served through our worker)
+      // Format: /sessions/{sessionId}/files/{path}
+      const r2Url = `/sessions/${context.sessionId}/files/${filePath}`;
+
+      storedFiles.push({
+        original: url,
+        r2Url,
+        path: filePath,
+      });
+    } catch (error) {
+      console.error(`Error storing file from ${url}:`, error);
+    }
+  }
+
+  return storedFiles;
+}
+
+// ============================================================
 // TOOL HANDLERS
 // ============================================================
 
@@ -474,7 +561,7 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
         return `Error creating prediction: ${error}`;
       }
 
-      const prediction = await createRes.json() as {
+      let prediction = await createRes.json() as {
         id: string;
         status: string;
         output?: unknown;
@@ -482,39 +569,37 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
         urls?: { get: string };
       };
 
-      // If not waiting or already completed
-      if (!wait || prediction.status === 'succeeded') {
-        return JSON.stringify({
-          id: prediction.id,
-          status: prediction.status,
-          output: prediction.output,
-          model: model,
-        }, null, 2);
-      }
-
-      // Poll for completion
+      // Poll for completion if needed
       if (prediction.status === 'starting' || prediction.status === 'processing') {
-        let result = prediction;
         for (let i = 0; i < 60; i++) {
           await new Promise((r) => setTimeout(r, 2000));
           const pollRes = await fetch(prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`, {
             headers: { 'Authorization': `Bearer ${apiToken}` },
           });
-          result = await pollRes.json() as typeof prediction;
-          if (result.status === 'succeeded' || result.status === 'failed' || result.status === 'canceled') {
+          prediction = await pollRes.json() as typeof prediction;
+          if (prediction.status === 'succeeded' || prediction.status === 'failed' || prediction.status === 'canceled') {
             break;
           }
         }
-        return JSON.stringify({
-          id: result.id,
-          status: result.status,
-          output: result.output,
-          error: result.error,
-          model: model,
-        }, null, 2);
       }
 
-      return JSON.stringify(prediction, null, 2);
+      // Store output files to R2 if generation succeeded
+      let storedFiles: Array<{ original: string; r2Url: string; path: string }> = [];
+      if (prediction.status === 'succeeded' && prediction.output) {
+        storedFiles = await storeReplicateOutputToR2(prediction.output, prediction.id, context);
+      }
+
+      return JSON.stringify({
+        id: prediction.id,
+        status: prediction.status,
+        output: prediction.output,
+        error: prediction.error,
+        model: model,
+        // Include R2 URLs for stored files
+        storedFiles: storedFiles.length > 0 ? storedFiles : undefined,
+        // Convenience: first stored image URL for easy access
+        imageUrl: storedFiles.length > 0 ? storedFiles[0].r2Url : undefined,
+      }, null, 2);
     } catch (error) {
       return `Error running Replicate model: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }

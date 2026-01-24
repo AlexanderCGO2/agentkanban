@@ -1,6 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { AgentMessage } from '@/types/agent';
+
+// Cloudflare worker base URL for serving R2 files
+const WORKER_BASE_URL = 'https://agentkanban-worker.alexander-53b.workers.dev';
 
 interface MessageListProps {
   messages: AgentMessage[];
@@ -16,6 +20,68 @@ export function MessageList({ messages }: MessageListProps) {
       ))}
     </div>
   );
+}
+
+/**
+ * Extract image URLs from tool results (handles Replicate output format)
+ */
+function extractImageUrls(content: string): string[] {
+  const urls: string[] = [];
+
+  try {
+    const parsed = JSON.parse(content);
+
+    // Check for our R2-stored imageUrl (preferred)
+    if (parsed.imageUrl) {
+      // Convert relative R2 path to full URL
+      const url = parsed.imageUrl.startsWith('/')
+        ? `${WORKER_BASE_URL}${parsed.imageUrl}`
+        : parsed.imageUrl;
+      urls.push(url);
+    }
+
+    // Check for storedFiles array (all R2-stored files)
+    if (parsed.storedFiles && Array.isArray(parsed.storedFiles)) {
+      for (const file of parsed.storedFiles) {
+        if (file.r2Url) {
+          const url = file.r2Url.startsWith('/')
+            ? `${WORKER_BASE_URL}${file.r2Url}`
+            : file.r2Url;
+          if (!urls.includes(url)) {
+            urls.push(url);
+          }
+        }
+      }
+    }
+
+    // Fallback: Check original Replicate output URLs
+    if (urls.length === 0 && parsed.output) {
+      if (typeof parsed.output === 'string' && isImageUrl(parsed.output)) {
+        urls.push(parsed.output);
+      } else if (Array.isArray(parsed.output)) {
+        for (const item of parsed.output) {
+          if (typeof item === 'string' && isImageUrl(item)) {
+            urls.push(item);
+          }
+        }
+      }
+    }
+  } catch {
+    // Not JSON, check for raw URLs in content
+    const urlRegex = /https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)(\?[^\s"']*)?/gi;
+    const matches = content.match(urlRegex);
+    if (matches) {
+      urls.push(...matches);
+    }
+  }
+
+  return urls;
+}
+
+function isImageUrl(url: string): boolean {
+  return /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url) ||
+         url.includes('replicate.delivery') ||
+         url.includes('pbxt.replicate.delivery');
 }
 
 function MessageItem({ message }: { message: AgentMessage }) {
@@ -105,6 +171,9 @@ function MessageItem({ message }: { message: AgentMessage }) {
     }
   };
 
+  // Extract images from tool results
+  const imageUrls = message.type === 'tool_result' ? extractImageUrls(message.content) : [];
+
   return (
     <div className={`rounded-lg border p-4 ${getMessageStyles()}`}>
       <div className="flex items-center gap-2 mb-2">
@@ -116,6 +185,15 @@ function MessageItem({ message }: { message: AgentMessage }) {
           {formatTime(message.timestamp)}
         </span>
       </div>
+
+      {/* Display images if present */}
+      {imageUrls.length > 0 && (
+        <div className="mb-3 grid gap-2 grid-cols-1 sm:grid-cols-2">
+          {imageUrls.map((url, index) => (
+            <ImagePreview key={index} url={url} />
+          ))}
+        </div>
+      )}
 
       <div className="text-sm text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap">
         {message.content}
@@ -131,6 +209,46 @@ function MessageItem({ message }: { message: AgentMessage }) {
           </pre>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Image preview component with loading state and error handling
+ */
+function ImagePreview({ url }: { url: string }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  return (
+    <div className="relative rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800">
+      {loading && !error && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <svg className="animate-spin h-6 w-6 text-zinc-400" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+        </div>
+      )}
+      {error ? (
+        <div className="flex items-center justify-center h-32 text-zinc-400 text-sm">
+          Failed to load image
+        </div>
+      ) : (
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt="Generated image"
+            className={`w-full h-auto max-h-64 object-contain cursor-pointer hover:opacity-90 transition-opacity ${loading ? 'opacity-0' : 'opacity-100'}`}
+            onLoad={() => setLoading(false)}
+            onError={() => {
+              setLoading(false);
+              setError(true);
+            }}
+          />
+        </a>
+      )}
     </div>
   );
 }
