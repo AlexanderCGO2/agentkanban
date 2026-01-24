@@ -282,6 +282,9 @@ export class AgentSession {
           session.status = 'completed';
           await persist();
 
+          // Log usage before sending done event for debugging
+          console.log('Sending done event with usage:', JSON.stringify(session.usage));
+
           sendEvent({
             type: 'done',
             content: lastResult,

@@ -186,6 +186,76 @@ async function runAgentCloudflare(
   let totalOutputTokens = 0;
   let finalResult = '';
 
+  // Helper to process a single SSE line
+  const processSSELine = async (line: string) => {
+    if (!line.startsWith('data: ')) return;
+
+    try {
+      const data = JSON.parse(line.slice(6));
+
+      if (data.type === 'assistant' && data.content) {
+        numTurns++;
+        finalResult = data.content;
+        const assistantMsg = await agentStore.addMessage(sessionId, {
+          type: 'assistant',
+          content: data.content,
+        });
+        onMessage?.(assistantMsg);
+      }
+
+      if (data.type === 'tool_use') {
+        const toolMsg = await agentStore.addMessage(sessionId, {
+          type: 'tool_use',
+          content: data.content || `Using tool: ${data.toolName}`,
+          toolName: data.toolName,
+          toolInput: data.toolInput,
+        });
+        onMessage?.(toolMsg);
+      }
+
+      if (data.type === 'tool_result') {
+        const toolResultMsg = await agentStore.addMessage(sessionId, {
+          type: 'tool_result',
+          content: data.content,
+          toolResult: data.toolResult,
+        });
+        onMessage?.(toolResultMsg);
+
+        // Extract and save any stored files from Replicate results
+        await extractAndSaveFiles(sessionId, data.content, data.toolName);
+      }
+
+      if (data.type === 'system') {
+        const systemMsg = await agentStore.addMessage(sessionId, {
+          type: 'system',
+          content: data.content,
+        });
+        onMessage?.(systemMsg);
+      }
+
+      if (data.type === 'error') {
+        throw new Error(data.content);
+      }
+
+      if (data.type === 'done') {
+        console.log('Received done event:', JSON.stringify(data));
+        if (data.content) finalResult = data.content;
+        if (data.usage) {
+          totalInputTokens = data.usage.inputTokens || 0;
+          totalOutputTokens = data.usage.outputTokens || 0;
+          console.log('Extracted usage - input:', totalInputTokens, 'output:', totalOutputTokens);
+        } else {
+          console.log('No usage data in done event');
+        }
+      }
+    } catch (parseError) {
+      // Only log if it looks like actual JSON (not empty or whitespace)
+      if (line.slice(6).trim()) {
+        console.error('Failed to parse SSE message:', line, parseError);
+      }
+    }
+  };
+
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -198,67 +268,13 @@ async function runAgentCloudflare(
       buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.type === 'assistant' && data.content) {
-              numTurns++;
-              finalResult = data.content;
-              const assistantMsg = await agentStore.addMessage(sessionId, {
-                type: 'assistant',
-                content: data.content,
-              });
-              onMessage?.(assistantMsg);
-            }
-
-            if (data.type === 'tool_use') {
-              const toolMsg = await agentStore.addMessage(sessionId, {
-                type: 'tool_use',
-                content: data.content || `Using tool: ${data.toolName}`,
-                toolName: data.toolName,
-                toolInput: data.toolInput,
-              });
-              onMessage?.(toolMsg);
-            }
-
-            if (data.type === 'tool_result') {
-              const toolResultMsg = await agentStore.addMessage(sessionId, {
-                type: 'tool_result',
-                content: data.content,
-                toolResult: data.toolResult,
-              });
-              onMessage?.(toolResultMsg);
-
-              // Extract and save any stored files from Replicate results
-              await extractAndSaveFiles(sessionId, data.content, data.toolName);
-            }
-
-            if (data.type === 'system') {
-              const systemMsg = await agentStore.addMessage(sessionId, {
-                type: 'system',
-                content: data.content,
-              });
-              onMessage?.(systemMsg);
-            }
-
-            if (data.type === 'error') {
-              throw new Error(data.content);
-            }
-
-            if (data.type === 'done') {
-              if (data.content) finalResult = data.content;
-              if (data.usage) {
-                totalInputTokens = data.usage.inputTokens || 0;
-                totalOutputTokens = data.usage.outputTokens || 0;
-              }
-            }
-
-          } catch (parseError) {
-            console.error('Failed to parse SSE message:', line, parseError);
-          }
-        }
+        await processSSELine(line);
       }
+    }
+
+    // Process any remaining data in the buffer after stream ends
+    if (buffer.trim()) {
+      await processSSELine(buffer);
     }
   } finally {
     reader.releaseLock();
