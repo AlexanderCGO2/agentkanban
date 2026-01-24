@@ -6,8 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 # KV Namespace for canvas storage
 [[kv_namespaces]]
 binding = "CANVAS_KV"
-id = "REPLACE_WITH_YOUR_KV_ID"
-preview_id = "REPLACE_WITH_YOUR_PREVIEW_KV_ID"
+id = "e4fbf4472c3f41e4834cc6710bf7b2d7"
 
 # R2 Bucket for large assets (SVG exports, images)
 # [[r2_buckets]]
