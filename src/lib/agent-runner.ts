@@ -635,45 +635,94 @@ function calculateCost(inputTokens: number, outputTokens: number): number {
 
 /**
  * Extract stored files from tool results and save to session
- * Handles Replicate outputs that store files to R2
+ * Handles: write_file results, Replicate outputs that store files to R2
  */
 async function extractAndSaveFiles(
   sessionId: string,
   content: string,
   toolName?: string
 ): Promise<void> {
-  // Only process replicate_run results
-  if (toolName !== 'replicate_run') return;
+  // Handle write_file tool results
+  if (toolName === 'write_file') {
+    // Parse "Successfully wrote X bytes to path"
+    const writeMatch = content.match(/Successfully wrote (\d+) bytes to (.+)/);
+    if (writeMatch) {
+      const size = parseInt(writeMatch[1], 10);
+      const path = writeMatch[2].trim();
+      const filename = path.split('/').pop() || path;
+      const ext = filename.split('.').pop()?.toLowerCase() || '';
 
-  try {
-    const parsed = JSON.parse(content);
+      // Determine file type from extension
+      const mimeTypes: Record<string, string> = {
+        'md': 'text/markdown',
+        'txt': 'text/plain',
+        'json': 'application/json',
+        'csv': 'text/csv',
+        'html': 'text/html',
+        'css': 'text/css',
+        'js': 'application/javascript',
+        'ts': 'application/typescript',
+        'py': 'text/x-python',
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+        'svg': 'image/svg+xml',
+        'pdf': 'application/pdf',
+      };
 
-    // Check for storedFiles array (files stored to R2)
-    if (parsed.storedFiles && Array.isArray(parsed.storedFiles)) {
-      for (const file of parsed.storedFiles) {
-        // Build full URL for the file
-        const fileUrl = file.r2Url.startsWith('/')
-          ? `${CLOUDFLARE_AGENT_URL}${file.r2Url}`
-          : file.r2Url;
+      const mimeType = mimeTypes[ext] || 'text/plain';
+      const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+      const isText = ['md', 'txt', 'json', 'csv', 'html', 'css', 'js', 'ts', 'py'].includes(ext);
 
-        // Determine file type from path/URL
-        const ext = file.path?.split('.').pop()?.toLowerCase() || 'bin';
-        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+      // Build R2 URL for the file
+      const fileUrl = `${CLOUDFLARE_AGENT_URL}/sessions/${sessionId}/files/${path}`;
 
-        // Extract filename from path
-        const filename = file.path?.split('/').pop() || `replicate_${parsed.id}_${Date.now()}.${ext}`;
-
-        await agentStore.addOutputFile(sessionId, {
-          filename,
-          path: file.path || filename,
-          type: isImage ? 'image' : 'other',
-          mimeType: isImage ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream',
-          size: 0, // Size unknown at this point
-          url: fileUrl,
-        });
-      }
+      await agentStore.addOutputFile(sessionId, {
+        filename,
+        path,
+        type: isImage ? 'image' : isText ? 'text' : 'other',
+        mimeType,
+        size,
+        url: fileUrl,
+      });
     }
-  } catch {
-    // Not valid JSON or no stored files, ignore
+    return;
+  }
+
+  // Handle replicate_run tool results
+  if (toolName === 'replicate_run') {
+    try {
+      const parsed = JSON.parse(content);
+
+      // Check for storedFiles array (files stored to R2)
+      if (parsed.storedFiles && Array.isArray(parsed.storedFiles)) {
+        for (const file of parsed.storedFiles) {
+          // Build full URL for the file
+          const fileUrl = file.r2Url.startsWith('/')
+            ? `${CLOUDFLARE_AGENT_URL}${file.r2Url}`
+            : file.r2Url;
+
+          // Determine file type from path/URL
+          const ext = file.path?.split('.').pop()?.toLowerCase() || 'bin';
+          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+
+          // Extract filename from path
+          const filename = file.path?.split('/').pop() || `replicate_${parsed.id}_${Date.now()}.${ext}`;
+
+          await agentStore.addOutputFile(sessionId, {
+            filename,
+            path: file.path || filename,
+            type: isImage ? 'image' : 'other',
+            mimeType: isImage ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream',
+            size: 0, // Size unknown at this point
+            url: fileUrl,
+          });
+        }
+      }
+    } catch {
+      // Not valid JSON or no stored files, ignore
+    }
   }
 }
