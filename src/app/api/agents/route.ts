@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       // Core tools
       'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'NotebookEdit', 'MCP',
       // Canvas tools
-      'canvas_create', 'canvas_delete', 'canvas_add_node', 'canvas_update_node', 'canvas_delete_node',
+      'canvas_create', 'canvas_delete', 'canvas_add_node', 'canvas_add_image', 'canvas_update_node', 'canvas_delete_node',
       'canvas_add_connection', 'canvas_delete_connection', 'canvas_list', 'canvas_get',
       'canvas_export_svg', 'canvas_export_json', 'canvas_layout_auto',
       // Mindmap tools
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       // Workflow tools
       'workflow_create',
       // Replicate AI tools
-      'replicate_run', 'replicate_search_models', 'replicate_get_model',
+      'replicate_run', 'replicate_search', 'replicate_search_models', 'replicate_get_model',
     ];
     const invalidTools = body.allowedTools.filter(t => !validTools.includes(t));
     if (invalidTools.length > 0) {
