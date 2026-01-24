@@ -41,6 +41,8 @@ export async function POST(request: NextRequest) {
       'workflow_create',
       // Replicate AI tools
       'replicate_run', 'replicate_search', 'replicate_search_models', 'replicate_get_model',
+      // ElevenLabs audio tools
+      'elevenlabs_text_to_dialogue',
     ];
     const invalidTools = body.allowedTools.filter(t => !validTools.includes(t));
     if (invalidTools.length > 0) {
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
     const validRoles: AgentRole[] = [
       'design', 'intern', 'project-manager', 'team-assist',
       'data-analyst', 'copywriter', 'accountant', 'developer',
-      'landing-page-creator', 'custom'
+      'landing-page-creator', 'ui-generator', 'podcast-creator', 'custom'
     ];
     const role = body.role || 'custom';
     if (!validRoles.includes(role)) {

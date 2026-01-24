@@ -725,4 +725,35 @@ async function extractAndSaveFiles(
       // Not valid JSON or no stored files, ignore
     }
   }
+
+  // Handle elevenlabs_text_to_dialogue tool results
+  if (toolName === 'elevenlabs_text_to_dialogue') {
+    try {
+      const parsed = JSON.parse(content);
+
+      // Check for storedFiles array (audio files stored to R2)
+      if (parsed.storedFiles && Array.isArray(parsed.storedFiles)) {
+        for (const file of parsed.storedFiles) {
+          const fileUrl = file.r2Url.startsWith('/')
+            ? `${CLOUDFLARE_AGENT_URL}${file.r2Url}`
+            : file.r2Url;
+
+          const ext = file.path?.split('.').pop()?.toLowerCase() || 'mp3';
+          const isAudio = ['mp3', 'wav', 'ogg', 'm4a'].includes(ext);
+          const filename = file.path?.split('/').pop() || `dialogue_${Date.now()}.${ext}`;
+
+          await agentStore.addOutputFile(sessionId, {
+            filename,
+            path: file.path || filename,
+            type: isAudio ? 'other' : 'text',
+            mimeType: isAudio ? 'audio/mpeg' : 'text/plain',
+            size: 0,
+            url: fileUrl,
+          });
+        }
+      }
+    } catch {
+      // Not valid JSON or no stored files, ignore
+    }
+  }
 }

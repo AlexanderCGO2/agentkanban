@@ -36,7 +36,9 @@ export type ToolName =
   | 'replicate_run'
   | 'replicate_search'
   | 'replicate_search_models'
-  | 'replicate_get_model';
+  | 'replicate_get_model'
+  // ElevenLabs audio tools
+  | 'elevenlabs_text_to_dialogue';
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
@@ -50,6 +52,8 @@ export type AgentRole =
   | 'accountant'
   | 'developer'
   | 'landing-page-creator'
+  | 'ui-generator'
+  | 'podcast-creator'
   | 'custom';
 
 export type OutputFileType = 'text' | 'markdown' | 'json' | 'csv' | 'image' | 'pdf' | 'other';

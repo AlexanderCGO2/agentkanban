@@ -13,6 +13,9 @@ export interface Env {
   // Replicate API token
   REPLICATE_API_TOKEN?: string;
 
+  // ElevenLabs API key
+  ELEVENLABS_API_KEY?: string;
+
   // Durable Object binding for session state
   AGENT_SESSION: DurableObjectNamespace;
 
@@ -85,8 +88,11 @@ export type ReplicateToolName =
   | 'replicate_search_models'
   | 'replicate_get_model';
 
+// Tool types - ElevenLabs tools
+export type ElevenLabsToolName = 'elevenlabs_text_to_dialogue';
+
 // All tool names
-export type ToolName = CoreToolName | CanvasToolName | ReplicateToolName;
+export type ToolName = CoreToolName | CanvasToolName | ReplicateToolName | ElevenLabsToolName;
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 

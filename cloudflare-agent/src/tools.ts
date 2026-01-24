@@ -377,6 +377,32 @@ const TOOL_DEFINITIONS: Record<ToolName, ToolDefinition> = {
       required: ['owner', 'name'],
     },
   },
+
+  // --- ElevenLabs Tools ---
+  elevenlabs_text_to_dialogue: {
+    name: 'elevenlabs_text_to_dialogue',
+    description: 'Generate natural dialogue audio from text using ElevenLabs Text to Dialogue API. Perfect for podcasts, interviews, and multi-speaker content. Use emotion tags like [cheerfully], [sadly], [excitedly] to add expression.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        inputs: {
+          type: 'array',
+          description: 'Array of dialogue inputs, each with text and voice assignment',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'The dialogue text. Can include emotion tags like [cheerfully], [sadly], [excitedly], [stuttering]' },
+              voice_id: { type: 'string', description: 'ElevenLabs voice ID (e.g., "9BWtsMINqrJLrRacOk9x" for Aria, "IKne3meq5aSn9XLyUdCD" for Sarah)' },
+              speaker_name: { type: 'string', description: 'Optional speaker name for transcript' },
+            },
+            required: ['text', 'voice_id'],
+          },
+        },
+        output_filename: { type: 'string', description: 'Optional filename for the output audio (default: dialogue_{timestamp}.mp3)' },
+      },
+      required: ['inputs'],
+    },
+  },
 };
 
 // ============================================================
@@ -706,6 +732,96 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
       }, null, 2);
     } catch (error) {
       return `Error getting model: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  },
+
+  // --- ElevenLabs Handlers ---
+  elevenlabs_text_to_dialogue: async (input, context) => {
+    const { inputs, output_filename } = input as {
+      inputs: Array<{ text: string; voice_id: string; speaker_name?: string }>;
+      output_filename?: string;
+    };
+
+    const apiKey = context.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      return 'Error: ELEVENLABS_API_KEY not configured. Set it via: npx wrangler secret put ELEVENLABS_API_KEY';
+    }
+
+    if (!inputs || inputs.length === 0) {
+      return 'Error: inputs array is required and must not be empty';
+    }
+
+    try {
+      // Call ElevenLabs Text to Dialogue API
+      const response = await fetch('https://api.elevenlabs.io/v1/text-to-dialogue/convert', {
+        method: 'POST',
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputs: inputs.map(item => ({
+            text: item.text,
+            voice_id: item.voice_id,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        return `Error from ElevenLabs API: ${response.status} - ${error}`;
+      }
+
+      // Get the audio data
+      const audioBuffer = await response.arrayBuffer();
+
+      // Generate filename
+      const timestamp = Date.now();
+      const filename = output_filename || `dialogue_${timestamp}.mp3`;
+      const filePath = `audio/${filename}`;
+      const r2Key = `sessions/${context.sessionId}/files/${filePath}`;
+
+      // Store in R2
+      await context.fileStorage.put(r2Key, audioBuffer, {
+        httpMetadata: { contentType: 'audio/mpeg' },
+        customMetadata: {
+          sessionId: context.sessionId,
+          createdAt: new Date().toISOString(),
+          speakers: inputs.map(i => i.speaker_name || 'Unknown').join(', '),
+        },
+      });
+
+      // Build transcript
+      const transcript = inputs.map((item, i) => {
+        const speaker = item.speaker_name || `Speaker ${i + 1}`;
+        return `${speaker}: ${item.text}`;
+      }).join('\n\n');
+
+      // Save transcript
+      const transcriptPath = `audio/${filename.replace('.mp3', '_transcript.txt')}`;
+      const transcriptKey = `sessions/${context.sessionId}/files/${transcriptPath}`;
+      await context.fileStorage.put(transcriptKey, transcript, {
+        httpMetadata: { contentType: 'text/plain' },
+      });
+
+      const r2Url = `/sessions/${context.sessionId}/files/${filePath}`;
+      const transcriptUrl = `/sessions/${context.sessionId}/files/${transcriptPath}`;
+
+      return JSON.stringify({
+        success: true,
+        audioUrl: r2Url,
+        transcriptUrl: transcriptUrl,
+        path: filePath,
+        transcriptPath: transcriptPath,
+        duration: 'Audio generated successfully',
+        speakers: inputs.map(i => i.speaker_name || 'Unknown'),
+        storedFiles: [
+          { original: 'elevenlabs', r2Url, path: filePath },
+          { original: 'transcript', r2Url: transcriptUrl, path: transcriptPath },
+        ],
+      }, null, 2);
+    } catch (error) {
+      return `Error generating dialogue: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   },
 };

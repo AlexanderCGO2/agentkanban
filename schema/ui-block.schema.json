@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/ui-block.schema.json",
+  "title": "UiBlockEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["blocks"],
+  "properties": {
+    "blocks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "type", "role", "content"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "type": { "const": "message" },
+              "role": { "enum": ["user", "assistant", "system"] },
+              "content": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "type", "text"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "type": { "const": "suggestion" },
+              "text": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "type", "level", "content"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "type": { "const": "status" },
+              "level": { "enum": ["info", "warning", "error"] },
+              "content": { "type": "string" }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

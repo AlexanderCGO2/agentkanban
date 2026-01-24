@@ -92,6 +92,11 @@ const ROLE_SUGGESTIONS: Record<string, string[]> = {
     'Create an invoice template',
     'Analyze budget vs actual spending',
   ],
+  'ui-generator': [
+    'Generate a concise chat response with suggested next actions',
+    'Summarize this request into UI message blocks',
+    'Create a helpful assistant reply and 3 suggestions',
+  ],
   custom: [
     'Help me with this task',
     'Analyze this information',
@@ -272,6 +277,8 @@ export function AgentRunner({
         return 'What financial data or calculations do you need processed?';
       case 'developer':
         return 'Describe the feature to implement or bug to fix...';
+      case 'ui-generator':
+        return 'Describe the UI response you want rendered...';
       default:
         return 'Enter your request...';
     }
