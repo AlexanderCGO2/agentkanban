@@ -133,12 +133,33 @@ const TOOL_DEFINITIONS: Record<ToolName, ToolDefinition> = {
       type: 'object',
       properties: {
         canvasId: { type: 'string', description: 'ID of the canvas' },
-        nodeType: { type: 'string', enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output'], description: 'Type of node' },
+        nodeType: { type: 'string', enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output', 'image'], description: 'Type of node' },
         label: { type: 'string', description: 'Label/text for the node' },
         x: { type: 'number', description: 'X position (optional)' },
         y: { type: 'number', description: 'Y position (optional)' },
+        width: { type: 'number', description: 'Width of node (optional)' },
+        height: { type: 'number', description: 'Height of node (optional)' },
+        imageUrl: { type: 'string', description: 'URL of image for image nodes (optional)' },
       },
       required: ['canvasId', 'nodeType', 'label'],
+    },
+  },
+
+  canvas_add_image: {
+    name: 'canvas_add_image',
+    description: 'Add an image to a canvas. Use this to add AI-generated images from Replicate to your design canvas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        canvasId: { type: 'string', description: 'ID of the canvas' },
+        imageUrl: { type: 'string', description: 'URL of the image (e.g., from Replicate)' },
+        label: { type: 'string', description: 'Caption/label for the image (optional)' },
+        x: { type: 'number', description: 'X position (optional)' },
+        y: { type: 'number', description: 'Y position (optional)' },
+        width: { type: 'number', description: 'Width of the image node (default: 200)' },
+        height: { type: 'number', description: 'Height of the image node (default: 200)' },
+      },
+      required: ['canvasId', 'imageUrl'],
     },
   },
 
@@ -399,6 +420,7 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
   canvas_list: createCanvasHandler('canvas_list'),
   canvas_get: createCanvasHandler('canvas_get'),
   canvas_add_node: createCanvasHandler('canvas_add_node'),
+  canvas_add_image: createCanvasHandler('canvas_add_image'),
   canvas_update_node: createCanvasHandler('canvas_update_node'),
   canvas_delete_node: createCanvasHandler('canvas_delete_node'),
   canvas_add_connection: createCanvasHandler('canvas_add_connection'),

@@ -284,7 +284,11 @@ canvas_add_image({
 1. DO NOT ask what they want - use the context they provided
 2. IMMEDIATELY call replicate_run with model "black-forest-labs/flux-schnell"
 3. Create a detailed prompt based on their request
-4. Return the generated image URL
+4. After getting the image URL, ALWAYS add it to a canvas:
+   - First check if a canvas exists with canvas_list
+   - If no canvas, create one with canvas_create
+   - Then add the image with canvas_add_image using the returned URL
+5. Tell the user the image has been added to the canvas
 
 ### Example Prompts for Common Design Tasks
 - UI Mockup: "A modern, clean dashboard interface with charts and sidebar navigation, professional design, light theme"

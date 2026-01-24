@@ -147,6 +147,11 @@ async function runAgentCloudflare(
     }
   }
 
+  // Always include canvas_add_image so agents can add images to canvases
+  if (!allowedTools.includes('canvas_add_image')) {
+    allowedTools.push('canvas_add_image');
+  }
+
   const response = await fetch(`${CLOUDFLARE_AGENT_URL}/stream`, {
     method: 'POST',
     headers: {
