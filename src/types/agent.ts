@@ -30,8 +30,11 @@ export type ToolName =
   | 'mindmap_add_branch'
   // Workflow tools
   | 'workflow_create'
+  // Canvas image tools
+  | 'canvas_add_image'
   // Replicate AI tools
   | 'replicate_run'
+  | 'replicate_search'
   | 'replicate_search_models'
   | 'replicate_get_model';
 

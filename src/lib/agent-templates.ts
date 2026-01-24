@@ -255,31 +255,47 @@ You have access to powerful canvas tools for visual design work:
 
 Use these tools to create visual diagrams that complement your written design documentation.
 
-## Replicate AI (Image Generation)
+## Replicate AI (Image Generation) - USE THIS FOR ALL IMAGE REQUESTS
 
-You have access to Replicate for AI image generation:
+**IMPORTANT**: When a user asks you to create, generate, or make an image - DO NOT ask clarifying questions. IMMEDIATELY use the replicate_run tool.
 
-### Available Tools
-- **replicate_search**: Search for AI models on Replicate
-- **replicate_run**: Run a model to generate images
+### How to Generate Images (Do This Immediately!)
 
-### Example: Generate an image with FLUX
+**Step 1**: Call replicate_run with a prompt
 \`\`\`
 replicate_run({
   model: "black-forest-labs/flux-schnell",
   input: {
-    prompt: "A professional UI mockup of a dashboard with charts",
-    num_outputs: 1
+    prompt: "your detailed image description here"
   }
 })
 \`\`\`
 
-### Popular Models for Design
-- **black-forest-labs/flux-schnell**: Fast, high-quality images
-- **black-forest-labs/flux-dev**: Higher quality, slower
-- **stability-ai/sdxl**: Stable Diffusion XL
+**Step 2**: The tool returns an image URL. Use it or add to canvas:
+\`\`\`
+canvas_add_image({
+  canvasId: "your-canvas-id",
+  imageUrl: "the-returned-url",
+  label: "Description of image"
+})
+\`\`\`
 
-After generating an image, use **canvas_add_image** to add it to your canvas with the returned URL.
+### When User Says "Create an Image" or "Generate an Image"
+1. DO NOT ask what they want - use the context they provided
+2. IMMEDIATELY call replicate_run with model "black-forest-labs/flux-schnell"
+3. Create a detailed prompt based on their request
+4. Return the generated image URL
+
+### Example Prompts for Common Design Tasks
+- UI Mockup: "A modern, clean dashboard interface with charts and sidebar navigation, professional design, light theme"
+- Logo: "A minimalist tech startup logo, abstract geometric shapes, blue and purple gradient"
+- Hero Image: "Professional business team collaboration, modern office, bright lighting, corporate style"
+- Icon Set: "A set of flat design icons for a mobile app, consistent style, vibrant colors"
+
+### Available Models (use flux-schnell by default)
+- **black-forest-labs/flux-schnell**: Fast, high-quality (DEFAULT - use this)
+- **black-forest-labs/flux-dev**: Higher quality, slower
+- **stability-ai/sdxl**: Alternative style
 
 ## Output Format Requirements
 
@@ -293,7 +309,7 @@ Every design document MUST include:
 
 ${VERIFICATION_CHECKLIST}`,
     defaultPrompt: 'Analyze the requirements and create comprehensive design documentation. Use canvas tools to create visual diagrams.',
-    allowedTools: ['Read', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'MCP', 'mindmap_create', 'mindmap_add_branch', 'workflow_create', 'canvas_create', 'canvas_add_node', 'canvas_add_connection', 'canvas_list', 'canvas_get', 'canvas_export_svg', 'canvas_export_json', 'canvas_layout_auto'],
+    allowedTools: ['Read', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'MCP', 'mindmap_create', 'mindmap_add_branch', 'workflow_create', 'canvas_create', 'canvas_add_node', 'canvas_add_image', 'canvas_add_connection', 'canvas_list', 'canvas_get', 'canvas_export_svg', 'canvas_export_json', 'canvas_layout_auto', 'replicate_search', 'replicate_run'],
     permissionMode: 'acceptEdits',
     maxTurns: 20,
     icon: '🎨',
