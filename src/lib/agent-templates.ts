@@ -18,6 +18,7 @@ export interface AgentTemplate {
   allowedTools: ToolName[];
   permissionMode: PermissionMode;
   maxTurns?: number;
+  enableReplicate?: boolean;
   icon: string;
   color: {
     bg: string;
@@ -249,7 +250,36 @@ You have access to powerful canvas tools for visual design work:
 - **canvas_import_json**: Import canvas from JSON
 - **canvas_layout_auto**: Auto-arrange with algorithms (horizontal, vertical, radial, tree, grid)
 
+### Image Operations
+- **canvas_add_image**: Add an image node to the canvas (use for AI-generated images)
+
 Use these tools to create visual diagrams that complement your written design documentation.
+
+## Replicate AI (Image Generation)
+
+You have access to Replicate for AI image generation:
+
+### Available Tools
+- **replicate_search**: Search for AI models on Replicate
+- **replicate_run**: Run a model to generate images
+
+### Example: Generate an image with FLUX
+\`\`\`
+replicate_run({
+  model: "black-forest-labs/flux-schnell",
+  input: {
+    prompt: "A professional UI mockup of a dashboard with charts",
+    num_outputs: 1
+  }
+})
+\`\`\`
+
+### Popular Models for Design
+- **black-forest-labs/flux-schnell**: Fast, high-quality images
+- **black-forest-labs/flux-dev**: Higher quality, slower
+- **stability-ai/sdxl**: Stable Diffusion XL
+
+After generating an image, use **canvas_add_image** to add it to your canvas with the returned URL.
 
 ## Output Format Requirements
 
@@ -279,7 +309,8 @@ ${VERIFICATION_CHECKLIST}`,
       { input: 'Feedback', output: 'Design-Iteration' },
       { input: 'Brand-Guidelines', output: 'Visuelle Assets' },
     ],
-    mcpTools: ['Canvas Tools', 'Mindmap', 'Workflow', 'SVG Export'],
+    enableReplicate: true,
+    mcpTools: ['Canvas Tools', 'Mindmap', 'Workflow', 'SVG Export', 'Replicate AI (Image Generation)'],
     mcpServers: {
       'design-mcp': {
         command: 'npx',

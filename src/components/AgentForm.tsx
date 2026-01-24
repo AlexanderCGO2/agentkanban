@@ -50,6 +50,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
     setPermissionMode(template.permissionMode);
     setMaxTurns(template.maxTurns);
     setSystemPrompt(template.systemPrompt);
+    setEnableReplicate(template.enableReplicate ?? false);
     // Convert template MCP config to agent MCP config
     if (template.mcpServers) {
       const converted: Record<string, McpServerConfig> = {};
