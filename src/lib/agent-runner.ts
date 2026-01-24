@@ -131,21 +131,20 @@ async function runAgentCloudflare(
 ): Promise<AgentResult> {
   console.log('Running agent via Cloudflare Worker...');
 
-  // Check if Replicate tools should be enabled
-  const hasReplicateTools = config.allowedTools?.some(t => t.startsWith('replicate_')) || config.enableReplicate;
-
-  // Build allowed tools list, adding Replicate tools if enabled
+  // Build allowed tools list
   let allowedTools = mapToolNames(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep']);
 
-  // Explicitly add Replicate tools if enableReplicate is true
-  if (hasReplicateTools) {
+  // Replicate tools are ALWAYS enabled by default (opt-out, not opt-in)
+  // Only disable if explicitly set to false
+  const enableReplicate = config.enableReplicate !== false;
+
+  if (enableReplicate) {
     const replicateTools = ['replicate_run', 'replicate_search', 'replicate_search_models', 'replicate_get_model'];
     for (const tool of replicateTools) {
       if (!allowedTools.includes(tool)) {
         allowedTools.push(tool);
       }
     }
-    console.log('Replicate tools enabled, allowedTools:', allowedTools);
   }
 
   const response = await fetch(`${CLOUDFLARE_AGENT_URL}/stream`, {
@@ -160,7 +159,7 @@ async function runAgentCloudflare(
       permissionMode: config.permissionMode || 'acceptEdits',
       maxTurns: config.maxTurns || 20,
       sessionId,
-      enableReplicate: hasReplicateTools,
+      enableReplicate,
     }),
   });
 

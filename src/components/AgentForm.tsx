@@ -34,7 +34,7 @@ export function AgentForm({ onSubmit, onCancel, loading }: AgentFormProps) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('acceptEdits');
   const [maxTurns, setMaxTurns] = useState<number | undefined>();
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [enableReplicate, setEnableReplicate] = useState(false);
+  const [enableReplicate, setEnableReplicate] = useState(true); // Enabled by default
   const [mcpServers, setMcpServers] = useState<Record<string, McpServerConfig> | undefined>(undefined);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
