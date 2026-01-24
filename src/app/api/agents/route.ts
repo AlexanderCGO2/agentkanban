@@ -61,8 +61,9 @@ export async function POST(request: NextRequest) {
 
     // Validate role
     const validRoles: AgentRole[] = [
-      'design', 'intern', 'project-manager', 'team-assist', 
-      'data-analyst', 'copywriter', 'accountant', 'developer', 'custom'
+      'design', 'intern', 'project-manager', 'team-assist',
+      'data-analyst', 'copywriter', 'accountant', 'developer',
+      'landing-page-creator', 'custom'
     ];
     const role = body.role || 'custom';
     if (!validRoles.includes(role)) {

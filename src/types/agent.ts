@@ -40,7 +40,7 @@ export type ToolName =
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
-export type AgentRole = 
+export type AgentRole =
   | 'design'
   | 'intern'
   | 'project-manager'
@@ -49,6 +49,7 @@ export type AgentRole =
   | 'copywriter'
   | 'accountant'
   | 'developer'
+  | 'landing-page-creator'
   | 'custom';
 
 export type OutputFileType = 'text' | 'markdown' | 'json' | 'csv' | 'image' | 'pdf' | 'other';
