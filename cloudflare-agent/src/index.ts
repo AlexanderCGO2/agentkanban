@@ -209,6 +209,7 @@ async function handleStreamAgent(request: Request, env: Env): Promise<Response> 
         allowedTools: body.allowedTools,
         permissionMode: body.permissionMode,
         maxTurns: body.maxTurns,
+        enableReplicate: body.enableReplicate,
       }),
     })
   );

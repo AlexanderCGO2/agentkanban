@@ -31,11 +31,19 @@ const TOOL_NAME_MAP: Record<string, string> = {
   'canvas_list': 'canvas_list',
   'canvas_get': 'canvas_get',
   'canvas_add_node': 'canvas_add_node',
+  'canvas_add_image': 'canvas_add_image',
+  'canvas_add_connection': 'canvas_add_connection',
+  'canvas_export_svg': 'canvas_export_svg',
+  'canvas_export_json': 'canvas_export_json',
+  'canvas_layout_auto': 'canvas_layout_auto',
   'mindmap_create': 'mindmap_create',
+  'mindmap_add_branch': 'mindmap_add_branch',
   'workflow_create': 'workflow_create',
   // Replicate tools
   'replicate_run': 'replicate_run',
+  'replicate_search': 'replicate_search',
   'replicate_search_models': 'replicate_search_models',
+  'replicate_get_model': 'replicate_get_model',
 };
 
 function mapToolNames(tools: string[]): string[] {
@@ -123,6 +131,23 @@ async function runAgentCloudflare(
 ): Promise<AgentResult> {
   console.log('Running agent via Cloudflare Worker...');
 
+  // Check if Replicate tools should be enabled
+  const hasReplicateTools = config.allowedTools?.some(t => t.startsWith('replicate_')) || config.enableReplicate;
+
+  // Build allowed tools list, adding Replicate tools if enabled
+  let allowedTools = mapToolNames(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep']);
+
+  // Explicitly add Replicate tools if enableReplicate is true
+  if (hasReplicateTools) {
+    const replicateTools = ['replicate_run', 'replicate_search', 'replicate_search_models', 'replicate_get_model'];
+    for (const tool of replicateTools) {
+      if (!allowedTools.includes(tool)) {
+        allowedTools.push(tool);
+      }
+    }
+    console.log('Replicate tools enabled, allowedTools:', allowedTools);
+  }
+
   const response = await fetch(`${CLOUDFLARE_AGENT_URL}/stream`, {
     method: 'POST',
     headers: {
@@ -131,10 +156,11 @@ async function runAgentCloudflare(
     body: JSON.stringify({
       prompt: fullPrompt,
       systemPrompt: config.systemPrompt || 'You are a helpful AI assistant.',
-      allowedTools: mapToolNames(config.allowedTools || ['Read', 'Write', 'WebSearch', 'WebFetch', 'Glob', 'Grep']),
+      allowedTools,
       permissionMode: config.permissionMode || 'acceptEdits',
       maxTurns: config.maxTurns || 20,
       sessionId,
+      enableReplicate: hasReplicateTools,
     }),
   });
 
