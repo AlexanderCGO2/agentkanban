@@ -128,20 +128,58 @@ const TOOL_DEFINITIONS: Record<ToolName, ToolDefinition> = {
 
   canvas_add_node: {
     name: 'canvas_add_node',
-    description: 'Add a node to an existing canvas',
+    description: 'Add a node to an existing canvas. Supports text nodes, images, videos, and audio.',
     input_schema: {
       type: 'object',
       properties: {
         canvasId: { type: 'string', description: 'ID of the canvas' },
-        nodeType: { type: 'string', enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output', 'image'], description: 'Type of node' },
+        nodeType: { type: 'string', enum: ['idea', 'task', 'research', 'note', 'decision', 'source', 'process', 'analyze', 'output', 'image', 'video', 'audio'], description: 'Type of node' },
         label: { type: 'string', description: 'Label/text for the node' },
         x: { type: 'number', description: 'X position (optional)' },
         y: { type: 'number', description: 'Y position (optional)' },
         width: { type: 'number', description: 'Width of node (optional)' },
         height: { type: 'number', description: 'Height of node (optional)' },
         imageUrl: { type: 'string', description: 'URL of image for image nodes (optional)' },
+        videoUrl: { type: 'string', description: 'URL of video for video nodes (optional)' },
+        audioUrl: { type: 'string', description: 'URL of audio for audio nodes (optional)' },
       },
       required: ['canvasId', 'nodeType', 'label'],
+    },
+  },
+
+  canvas_add_video: {
+    name: 'canvas_add_video',
+    description: 'Add a video node to a canvas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        canvasId: { type: 'string', description: 'ID of the canvas' },
+        videoUrl: { type: 'string', description: 'URL of the video' },
+        label: { type: 'string', description: 'Caption/label for the video (optional)' },
+        x: { type: 'number', description: 'X position (optional)' },
+        y: { type: 'number', description: 'Y position (optional)' },
+        width: { type: 'number', description: 'Width of the video node (default: 320)' },
+        height: { type: 'number', description: 'Height of the video node (default: 180)' },
+      },
+      required: ['canvasId', 'videoUrl'],
+    },
+  },
+
+  canvas_add_audio: {
+    name: 'canvas_add_audio',
+    description: 'Add an audio node to a canvas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        canvasId: { type: 'string', description: 'ID of the canvas' },
+        audioUrl: { type: 'string', description: 'URL of the audio file' },
+        label: { type: 'string', description: 'Caption/label for the audio (optional)' },
+        x: { type: 'number', description: 'X position (optional)' },
+        y: { type: 'number', description: 'Y position (optional)' },
+        width: { type: 'number', description: 'Width of the audio node (default: 300)' },
+        height: { type: 'number', description: 'Height of the audio node (default: 80)' },
+      },
+      required: ['canvasId', 'audioUrl'],
     },
   },
 
@@ -508,6 +546,8 @@ const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
   canvas_get: createCanvasHandler('canvas_get'),
   canvas_add_node: createCanvasHandler('canvas_add_node'),
   canvas_add_image: createCanvasHandler('canvas_add_image'),
+  canvas_add_video: createCanvasHandler('canvas_add_video'),
+  canvas_add_audio: createCanvasHandler('canvas_add_audio'),
   canvas_update_node: createCanvasHandler('canvas_update_node'),
   canvas_delete_node: createCanvasHandler('canvas_delete_node'),
   canvas_add_connection: createCanvasHandler('canvas_add_connection'),

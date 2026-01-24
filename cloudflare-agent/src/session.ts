@@ -234,7 +234,9 @@ export class AgentSession {
                     sendEvent({
                       type: 'tool_result',
                       toolUseId: block.id,
+                      toolName: block.name,
                       toolResult: result,
+                      content: result,
                     });
 
                     toolResults.push({
@@ -247,7 +249,9 @@ export class AgentSession {
                     sendEvent({
                       type: 'tool_result',
                       toolUseId: block.id,
+                      toolName: block.name,
                       toolResult: `Error: ${errorMsg}`,
+                      content: `Error: ${errorMsg}`,
                     });
                     toolResults.push({
                       type: 'tool_result',
@@ -400,7 +404,9 @@ export class AgentSession {
               outputMessages.push({
                 type: 'tool_result',
                 toolUseId: block.id,
+                toolName: block.name,
                 toolResult: result,
+                content: result,
               });
 
               toolResults.push({
@@ -413,7 +419,9 @@ export class AgentSession {
               outputMessages.push({
                 type: 'tool_result',
                 toolUseId: block.id,
+                toolName: block.name,
                 toolResult: `Error: ${errorMsg}`,
+                content: `Error: ${errorMsg}`,
               });
               toolResults.push({
                 type: 'tool_result',

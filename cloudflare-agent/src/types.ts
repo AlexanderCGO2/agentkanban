@@ -66,6 +66,8 @@ export type CanvasToolName =
   | 'canvas_get'
   | 'canvas_add_node'
   | 'canvas_add_image'
+  | 'canvas_add_video'
+  | 'canvas_add_audio'
   | 'canvas_update_node'
   | 'canvas_delete_node'
   | 'canvas_add_connection'

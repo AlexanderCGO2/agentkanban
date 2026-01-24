@@ -11,8 +11,11 @@ interface CanvasNode {
   y: number;
   width: number;
   height: number;
+  // Media properties
   imageUrl?: string;
   imageData?: string;
+  videoUrl?: string;
+  audioUrl?: string;
   // Styling properties
   fontSize?: number;
   fontFamily?: string;
@@ -61,6 +64,8 @@ const NODE_COLORS: Record<string, { bg: string; border: string; text: string }> 
   analyze: { bg: '#fef9c3', border: '#eab308', text: '#a16207' },
   output: { bg: '#d1fae5', border: '#10b981', text: '#065f46' },
   image: { bg: '#18181b', border: '#6366f1', text: '#e5e7eb' },
+  video: { bg: '#1e1b4b', border: '#c026d3', text: '#f5d0fe' },
+  audio: { bg: '#1c1917', border: '#f97316', text: '#fed7aa' },
 };
 
 const FONT_FAMILIES = [
@@ -809,80 +814,148 @@ export default function EditableCanvas({ canvas: initialCanvas, onSave, onClose 
         </button>
       </div>
 
-      {/* Formatting panel */}
+      {/* Node Editor Panel */}
       {showFormatting && selectedNode && (
-        <div className="flex-none flex items-center gap-4 p-3 bg-zinc-900/80 border-b border-zinc-800">
-          {/* Font family */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Font:</span>
-            <select
-              value={selectedNode.fontFamily || 'system-ui'}
-              onChange={(e) => updateSelectedNodesStyle({ fontFamily: e.target.value })}
-              className="bg-zinc-800 text-zinc-300 text-sm rounded px-2 py-1 border border-zinc-700"
-            >
-              {FONT_FAMILIES.map(f => (
-                <option key={f.value} value={f.value}>{f.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Font size */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Size:</span>
-            <input
-              type="number"
-              value={selectedNode.fontSize || 12}
-              onChange={(e) => updateSelectedNodesStyle({ fontSize: parseInt(e.target.value) || 12 })}
-              className="w-14 bg-zinc-800 text-zinc-300 text-sm rounded px-2 py-1 border border-zinc-700"
-              min={8}
-              max={48}
-            />
-          </div>
-
-          <div className="h-6 w-px bg-zinc-700" />
-
-          {/* Text color */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Text:</span>
-            <div className="flex gap-1">
-              {COLORS.slice(0, 8).map(color => (
-                <button
-                  key={color}
-                  onClick={() => updateSelectedNodesStyle({ textColor: color })}
-                  className={`w-5 h-5 rounded border-2 ${selectedNode.textColor === color ? 'border-white' : 'border-transparent'}`}
-                  style={{ backgroundColor: color }}
+        <div className="flex-none bg-zinc-900/95 border-b border-zinc-800 max-h-64 overflow-y-auto">
+          <div className="p-3 space-y-3">
+            {/* Row 1: Label and Type */}
+            <div className="flex gap-4">
+              {/* Label */}
+              <div className="flex-1">
+                <label className="block text-xs text-zinc-500 mb-1">Label / Content</label>
+                <textarea
+                  value={selectedNode.label}
+                  onChange={(e) => updateSelectedNodesStyle({ label: e.target.value })}
+                  className="w-full bg-zinc-800 text-zinc-200 text-sm rounded px-2 py-1.5 border border-zinc-700 resize-none"
+                  rows={2}
+                  placeholder="Enter text..."
                 />
-              ))}
+              </div>
+
+              {/* Type */}
+              <div className="w-32">
+                <label className="block text-xs text-zinc-500 mb-1">Type</label>
+                <select
+                  value={selectedNode.type}
+                  onChange={(e) => updateSelectedNodesStyle({ type: e.target.value })}
+                  className="w-full bg-zinc-800 text-zinc-300 text-sm rounded px-2 py-1.5 border border-zinc-700"
+                >
+                  {Object.keys(NODE_COLORS).map(type => (
+                    <option key={type} value={type} className="capitalize">{type}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* Background color */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Fill:</span>
-            <div className="flex gap-1">
-              {COLORS.map(color => (
-                <button
-                  key={color}
-                  onClick={() => updateSelectedNodesStyle({ bgColor: color })}
-                  className={`w-5 h-5 rounded border-2 ${selectedNode.bgColor === color ? 'border-white' : 'border-transparent'}`}
-                  style={{ backgroundColor: color }}
+            {/* Row 2: Media URLs */}
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <label className="block text-xs text-zinc-500 mb-1">Image URL</label>
+                <input
+                  type="url"
+                  value={selectedNode.imageUrl || ''}
+                  onChange={(e) => updateSelectedNodesStyle({ imageUrl: e.target.value || undefined })}
+                  className="w-full bg-zinc-800 text-zinc-200 text-sm rounded px-2 py-1 border border-zinc-700"
+                  placeholder="https://..."
                 />
-              ))}
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-zinc-500 mb-1">Video URL</label>
+                <input
+                  type="url"
+                  value={selectedNode.videoUrl || ''}
+                  onChange={(e) => updateSelectedNodesStyle({ videoUrl: e.target.value || undefined })}
+                  className="w-full bg-zinc-800 text-zinc-200 text-sm rounded px-2 py-1 border border-zinc-700"
+                  placeholder="https://..."
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-zinc-500 mb-1">Audio URL</label>
+                <input
+                  type="url"
+                  value={selectedNode.audioUrl || ''}
+                  onChange={(e) => updateSelectedNodesStyle({ audioUrl: e.target.value || undefined })}
+                  className="w-full bg-zinc-800 text-zinc-200 text-sm rounded px-2 py-1 border border-zinc-700"
+                  placeholder="https://..."
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Border color */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Border:</span>
-            <div className="flex gap-1">
-              {COLORS.slice(0, 8).map(color => (
-                <button
-                  key={color}
-                  onClick={() => updateSelectedNodesStyle({ borderColor: color })}
-                  className={`w-5 h-5 rounded border-2 ${selectedNode.borderColor === color ? 'border-white' : 'border-transparent'}`}
-                  style={{ backgroundColor: color }}
+            {/* Row 3: Styling */}
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* Font family */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Font:</span>
+                <select
+                  value={selectedNode.fontFamily || 'system-ui'}
+                  onChange={(e) => updateSelectedNodesStyle({ fontFamily: e.target.value })}
+                  className="bg-zinc-800 text-zinc-300 text-sm rounded px-2 py-1 border border-zinc-700"
+                >
+                  {FONT_FAMILIES.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Font size */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Size:</span>
+                <input
+                  type="number"
+                  value={selectedNode.fontSize || 12}
+                  onChange={(e) => updateSelectedNodesStyle({ fontSize: parseInt(e.target.value) || 12 })}
+                  className="w-14 bg-zinc-800 text-zinc-300 text-sm rounded px-2 py-1 border border-zinc-700"
+                  min={8}
+                  max={48}
                 />
-              ))}
+              </div>
+
+              <div className="h-6 w-px bg-zinc-700" />
+
+              {/* Text color */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Text:</span>
+                <div className="flex gap-1">
+                  {COLORS.slice(0, 8).map(color => (
+                    <button
+                      key={color}
+                      onClick={() => updateSelectedNodesStyle({ textColor: color })}
+                      className={`w-5 h-5 rounded border-2 ${selectedNode.textColor === color ? 'border-white' : 'border-transparent'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Background color */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Fill:</span>
+                <div className="flex gap-1">
+                  {COLORS.slice(0, 10).map(color => (
+                    <button
+                      key={color}
+                      onClick={() => updateSelectedNodesStyle({ bgColor: color })}
+                      className={`w-5 h-5 rounded border-2 ${selectedNode.bgColor === color ? 'border-white' : 'border-transparent'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Border color */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Border:</span>
+                <div className="flex gap-1">
+                  {COLORS.slice(0, 8).map(color => (
+                    <button
+                      key={color}
+                      onClick={() => updateSelectedNodesStyle({ borderColor: color })}
+                      className={`w-5 h-5 rounded border-2 ${selectedNode.borderColor === color ? 'border-white' : 'border-transparent'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>

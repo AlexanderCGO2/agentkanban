@@ -229,6 +229,9 @@ async function runAgentCloudflare(
                 toolResult: data.toolResult,
               });
               onMessage?.(toolResultMsg);
+
+              // Extract and save any stored files from Replicate results
+              await extractAndSaveFiles(sessionId, data.content, data.toolName);
             }
 
             if (data.type === 'system') {
@@ -612,4 +615,49 @@ function calculateCost(inputTokens: number, outputTokens: number): number {
   const inputCostPer1k = 0.003;
   const outputCostPer1k = 0.015;
   return (inputTokens / 1000) * inputCostPer1k + (outputTokens / 1000) * outputCostPer1k;
+}
+
+/**
+ * Extract stored files from tool results and save to session
+ * Handles Replicate outputs that store files to R2
+ */
+async function extractAndSaveFiles(
+  sessionId: string,
+  content: string,
+  toolName?: string
+): Promise<void> {
+  // Only process replicate_run results
+  if (toolName !== 'replicate_run') return;
+
+  try {
+    const parsed = JSON.parse(content);
+
+    // Check for storedFiles array (files stored to R2)
+    if (parsed.storedFiles && Array.isArray(parsed.storedFiles)) {
+      for (const file of parsed.storedFiles) {
+        // Build full URL for the file
+        const fileUrl = file.r2Url.startsWith('/')
+          ? `${CLOUDFLARE_AGENT_URL}${file.r2Url}`
+          : file.r2Url;
+
+        // Determine file type from path/URL
+        const ext = file.path?.split('.').pop()?.toLowerCase() || 'bin';
+        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+
+        // Extract filename from path
+        const filename = file.path?.split('/').pop() || `replicate_${parsed.id}_${Date.now()}.${ext}`;
+
+        await agentStore.addOutputFile(sessionId, {
+          filename,
+          path: file.path || filename,
+          type: isImage ? 'image' : 'other',
+          mimeType: isImage ? `image/${ext === 'jpg' ? 'jpeg' : ext}` : 'application/octet-stream',
+          size: 0, // Size unknown at this point
+          url: fileUrl,
+        });
+      }
+    }
+  } catch {
+    // Not valid JSON or no stored files, ignore
+  }
 }
