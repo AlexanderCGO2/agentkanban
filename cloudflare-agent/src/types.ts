@@ -1,5 +1,6 @@
 /**
  * Shared type definitions for the Cloudflare Agent Worker
+ * Version 2.0 - Includes SDK adapter and sandbox types
  */
 
 // Environment bindings
@@ -16,8 +17,15 @@ export interface Env {
   // ElevenLabs API key
   ELEVENLABS_API_KEY?: string;
 
+  // Search API keys (for web_search tool)
+  BRAVE_API_KEY?: string;
+  SERPER_API_KEY?: string;
+
   // Durable Object binding for session state
   AGENT_SESSION: DurableObjectNamespace;
+
+  // Sandbox Durable Object for code execution
+  SANDBOX_DO: DurableObjectNamespace;
 
   // R2 bucket for file workspaces
   FILE_STORAGE: R2Bucket;
@@ -31,7 +39,10 @@ export interface Env {
   };
 }
 
-// Sandbox interfaces
+// ============================================================
+// SANDBOX TYPES
+// ============================================================
+
 export interface Sandbox {
   exec(command: string, args?: string[], options?: ExecOptions): Promise<ExecResult>;
   spawn(command: string, args?: string[], options?: ExecOptions): SpawnProcess;
@@ -58,10 +69,33 @@ export interface SpawnProcess {
   wait(): Promise<{ exitCode: number }>;
 }
 
-// Tool types - Core tools
+export type SandboxLanguage = 'python' | 'javascript' | 'bash';
+
+export interface CodeExecutionRequest {
+  language: SandboxLanguage;
+  code: string;
+  timeout?: number;
+}
+
+export interface CodeExecutionResult {
+  success: boolean;
+  output: string;
+  error?: string;
+  executionTime: number;
+  exitCode: number;
+}
+
+// ============================================================
+// TOOL TYPES
+// ============================================================
+
+// Core tools
 export type CoreToolName = 'web_search' | 'read_file' | 'write_file' | 'list_files' | 'bash';
 
-// Tool types - Canvas MCP tools
+// Sandbox execution tools
+export type SandboxToolName = 'execute_python' | 'execute_javascript' | 'execute_bash';
+
+// Canvas MCP tools
 export type CanvasToolName =
   | 'canvas_create'
   | 'canvas_delete'
@@ -82,21 +116,112 @@ export type CanvasToolName =
   | 'mindmap_add_branch'
   | 'workflow_create';
 
-// Tool types - Replicate tools
+// Replicate tools
 export type ReplicateToolName =
   | 'replicate_run'
   | 'replicate_search_models'
   | 'replicate_get_model';
 
-// Tool types - ElevenLabs tools
+// ElevenLabs tools
 export type ElevenLabsToolName = 'elevenlabs_text_to_dialogue';
 
+// Email tools (stub for Workers)
+export type EmailToolName = 'email_search' | 'email_read' | 'email_draft';
+
+// Research agent tools
+export type ResearchToolName = 'delegate_to_agent';
+
 // All tool names
-export type ToolName = CoreToolName | CanvasToolName | ReplicateToolName | ElevenLabsToolName;
+export type ToolName =
+  | CoreToolName
+  | SandboxToolName
+  | CanvasToolName
+  | ReplicateToolName
+  | ElevenLabsToolName
+  | EmailToolName
+  | ResearchToolName;
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 
-// Agent request/response types
+// ============================================================
+// SDK ADAPTER TYPES
+// ============================================================
+
+export type SDKMessageType =
+  | 'user'
+  | 'assistant'
+  | 'tool_use'
+  | 'tool_result'
+  | 'thinking'
+  | 'error'
+  | 'done';
+
+export interface SDKMessage {
+  type: SDKMessageType;
+  content?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  toolResult?: string;
+  toolUseId?: string;
+  thinking?: string;
+  usage?: TokenUsage;
+}
+
+export interface SDKSessionOptions {
+  model?: string;
+  systemPrompt?: string;
+  tools?: ToolName[];
+  maxTurns?: number;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface SDKStreamOptions {
+  onMessage?: (message: SDKMessage) => void;
+  onToolUse?: (tool: { name: string; input: unknown; id: string }) => void;
+  onToolResult?: (result: { id: string; output: string }) => void;
+  onError?: (error: Error) => void;
+  onDone?: (result: { content: string; usage: TokenUsage }) => void;
+}
+
+// ============================================================
+// AGENT TYPES
+// ============================================================
+
+export type AgentName =
+  | 'hello-world'
+  | 'research'
+  | 'chat'
+  | 'resume'
+  | 'email'
+  | 'excel'
+  | 'code-interpreter';
+
+export interface AgentConfig {
+  name: AgentName;
+  description: string;
+  systemPrompt: string;
+  tools: ToolName[];
+  maxTurns: number;
+  model?: string;
+  temperature?: number;
+}
+
+export interface AgentRegistry {
+  [key: string]: AgentConfig;
+}
+
+export interface SubAgent {
+  name: string;
+  role: string;
+  systemPrompt: string;
+  tools: ToolName[];
+}
+
+// ============================================================
+// REQUEST/RESPONSE TYPES
+// ============================================================
+
 export interface AgentRequest {
   prompt: string;
   systemPrompt?: string;
@@ -104,6 +229,7 @@ export interface AgentRequest {
   permissionMode?: PermissionMode;
   maxTurns?: number;
   sessionId?: string;
+  enableReplicate?: boolean;
 }
 
 export interface AgentMessage {
@@ -123,7 +249,10 @@ export interface TokenUsage {
   cacheCreationInputTokens?: number;
 }
 
-// Session state (persisted in Durable Object)
+// ============================================================
+// SESSION TYPES
+// ============================================================
+
 export interface SessionState {
   id: string;
   createdAt: string;
@@ -133,6 +262,7 @@ export interface SessionState {
   files: FileReference[];
   usage: TokenUsage;
   config: SessionConfig;
+  agentName?: AgentName;
 }
 
 export interface SessionConfig {
@@ -140,6 +270,8 @@ export interface SessionConfig {
   allowedTools: ToolName[];
   permissionMode: PermissionMode;
   maxTurns: number;
+  model?: string;
+  temperature?: number;
 }
 
 export interface ConversationMessage {
@@ -166,7 +298,10 @@ export interface FileReference {
   createdAt: string;
 }
 
-// Tool definitions for Claude API
+// ============================================================
+// TOOL DEFINITIONS
+// ============================================================
+
 export interface ToolDefinition {
   name: ToolName;
   description: string;
@@ -181,6 +316,7 @@ export interface ToolExecutionContext {
   sessionId: string;
   env: Env;
   fileStorage: R2Bucket;
+  sandboxDO?: DurableObjectStub;
 }
 
 export type ToolHandler = (
@@ -188,7 +324,10 @@ export type ToolHandler = (
   context: ToolExecutionContext
 ) => Promise<string>;
 
-// Queue task types
+// ============================================================
+// QUEUE TYPES
+// ============================================================
+
 export interface QueuedTask {
   type: 'agent_run';
   sessionId: string;
@@ -197,7 +336,10 @@ export interface QueuedTask {
   timestamp: string;
 }
 
-// Error types
+// ============================================================
+// ERROR TYPES
+// ============================================================
+
 export class AgentError extends Error {
   constructor(
     message: string,
@@ -215,4 +357,23 @@ export type ErrorCode =
   | 'TOOL_EXECUTION_FAILED'
   | 'API_ERROR'
   | 'TIMEOUT'
-  | 'QUOTA_EXCEEDED';
+  | 'QUOTA_EXCEEDED'
+  | 'AGENT_NOT_FOUND'
+  | 'SANDBOX_ERROR';
+
+// ============================================================
+// WEBSOCKET TYPES (for chat agent)
+// ============================================================
+
+export interface WebSocketMessage {
+  type: 'message' | 'typing' | 'error' | 'connected' | 'disconnected';
+  content?: string;
+  sessionId?: string;
+  timestamp?: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
