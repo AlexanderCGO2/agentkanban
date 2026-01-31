@@ -281,13 +281,13 @@ export interface ConversationMessage {
 }
 
 export interface ContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result';
+  type: 'text' | 'tool_use' | 'tool_result' | 'server_tool_use' | 'web_search_tool_result';
   text?: string;
   id?: string;
   name?: string;
   input?: unknown;
   tool_use_id?: string;
-  content?: string;
+  content?: string | unknown;
 }
 
 export interface FileReference {

@@ -14,7 +14,7 @@ import type {
   FileReference,
   ToolName,
 } from './types';
-import { getToolDefinitions, executeToolCall } from './tools';
+import { getToolDefinitions, executeToolCall, hasWebSearchTool } from './tools';
 
 export class AgentSession {
   private state: DurableObjectState;
@@ -29,17 +29,22 @@ export class AgentSession {
 
     // Load state on construction
     this.state.blockConcurrencyWhile(async () => {
-      this.sessionData = await this.state.storage.get<SessionState>('session') || null;
+      this.sessionData = (await this.state.storage.get<SessionState>('session')) || null;
     });
   }
 
   /**
    * Initialize a new session
+   * @param config - Session configuration
+   * @param originalSessionId - The original session ID used to create this DO (for consistent R2 paths)
    */
-  async initialize(config: Partial<SessionConfig>): Promise<SessionState> {
+  async initialize(config: Partial<SessionConfig>, originalSessionId?: string): Promise<SessionState> {
     const now = new Date().toISOString();
+    // Use the original sessionId if provided, otherwise fall back to DO's internal ID
+    // This ensures R2 file paths match the URLs used by the frontend
+    const sessionId = originalSessionId || this.state.id.toString();
     this.sessionData = {
-      id: this.state.id.toString(),
+      id: sessionId,
       createdAt: now,
       updatedAt: now,
       status: 'idle',
@@ -48,9 +53,12 @@ export class AgentSession {
       usage: { inputTokens: 0, outputTokens: 0 },
       config: {
         systemPrompt: config.systemPrompt || 'You are a helpful AI assistant.',
-        allowedTools: config.allowedTools || ['web_search', 'read_file', 'write_file', 'list_files'],
+        allowedTools:
+          config.allowedTools || (['web_search', 'read_file', 'write_file', 'list_files'] as ToolName[]),
         permissionMode: config.permissionMode || 'default',
         maxTurns: config.maxTurns || 10,
+        model: config.model,
+        temperature: config.temperature,
       },
     };
     await this.persist();
@@ -143,7 +151,20 @@ export class AgentSession {
     const anthropic = this.anthropic;
     const env = this.env;
     const persist = this.persist.bind(this);
-    const tools = getToolDefinitions(session.config.allowedTools);
+    const customTools = getToolDefinitions(session.config.allowedTools);
+    const useWebSearch = hasWebSearchTool(session.config.allowedTools);
+    const model = session.config.model || 'claude-sonnet-4-20250514';
+
+    // Build combined tools array: custom tools + server tools (web_search)
+    const allTools: Anthropic.Tool[] = [
+      ...(customTools as Anthropic.Tool[]),
+      // Add Anthropic's built-in server-side web search if enabled
+      ...(useWebSearch ? [{
+        type: 'web_search_20250305' as const,
+        name: 'web_search',
+        max_uses: 10,
+      }] : []),
+    ];
 
     // Add user message
     session.messages.push({
@@ -153,6 +174,13 @@ export class AgentSession {
     });
     session.status = 'running';
     await persist();
+
+    // Get sandbox DO for tool execution if available
+    let sandboxDO: DurableObjectStub | undefined;
+    if (env.SANDBOX_DO) {
+      const sandboxId = env.SANDBOX_DO.idFromName(session.id);
+      sandboxDO = env.SANDBOX_DO.get(sandboxId);
+    }
 
     return new ReadableStream({
       async start(controller) {
@@ -167,18 +195,19 @@ export class AgentSession {
           while (iterations < session.config.maxTurns) {
             iterations++;
 
-            // Build messages for API - cast to Anthropic's expected types
+            // Build messages for API
             const apiMessages = session.messages.map((m) => ({
               role: m.role as 'user' | 'assistant',
               content: m.content as MessageParam['content'],
             })) as MessageParam[];
 
             const response = await anthropic.messages.create({
-              model: 'claude-sonnet-4-20250514',
+              model,
               max_tokens: 4096,
               system: session.config.systemPrompt,
               messages: apiMessages,
-              tools: tools.length > 0 ? (tools as Anthropic.Tool[]) : undefined,
+              tools: allTools.length > 0 ? allTools : undefined,
+              temperature: session.config.temperature,
             });
 
             // Update usage
@@ -188,6 +217,7 @@ export class AgentSession {
             // Process response blocks
             const contentBlocks: ContentBlock[] = [];
             let hasToolUse = false;
+            let hasServerToolUse = false;
 
             for (const block of response.content) {
               if (block.type === 'text') {
@@ -208,6 +238,40 @@ export class AgentSession {
                   name: block.name,
                   input: block.input,
                 });
+              } else if (block.type === 'server_tool_use') {
+                // Server tool (web_search) - executed by Anthropic's servers
+                hasServerToolUse = true;
+                const serverBlock = block as { type: 'server_tool_use'; id: string; name: string; input: unknown };
+                sendEvent({
+                  type: 'tool_use',
+                  toolName: serverBlock.name,
+                  toolInput: serverBlock.input,
+                  toolUseId: serverBlock.id,
+                });
+                contentBlocks.push({
+                  type: 'server_tool_use',
+                  id: serverBlock.id,
+                  name: serverBlock.name,
+                  input: serverBlock.input,
+                } as ContentBlock);
+              } else if (block.type === 'web_search_tool_result') {
+                // Server tool result - already executed, just display
+                const resultBlock = block as { type: 'web_search_tool_result'; tool_use_id: string; content: unknown };
+                const resultContent = typeof resultBlock.content === 'string'
+                  ? resultBlock.content
+                  : JSON.stringify(resultBlock.content, null, 2);
+                sendEvent({
+                  type: 'tool_result',
+                  toolUseId: resultBlock.tool_use_id,
+                  toolName: 'web_search',
+                  toolResult: resultContent,
+                  content: resultContent,
+                });
+                contentBlocks.push({
+                  type: 'web_search_tool_result',
+                  tool_use_id: resultBlock.tool_use_id,
+                  content: resultBlock.content,
+                } as ContentBlock);
               }
             }
 
@@ -228,7 +292,12 @@ export class AgentSession {
                     const result = await executeToolCall(
                       block.name as ToolName,
                       block.input as Record<string, unknown>,
-                      { sessionId: session.id, env, fileStorage: env.FILE_STORAGE }
+                      {
+                        sessionId: session.id,
+                        env,
+                        fileStorage: env.FILE_STORAGE,
+                        sandboxDO,
+                      }
                     );
 
                     sendEvent({
@@ -282,7 +351,6 @@ export class AgentSession {
           session.status = 'completed';
           await persist();
 
-          // Log usage before sending done event for debugging
           console.log('Sending done event with usage:', JSON.stringify(session.usage));
 
           sendEvent({
@@ -335,23 +403,43 @@ export class AgentSession {
   private async executeAgentLoop(outputMessages: AgentMessage[]): Promise<string> {
     let lastResult = '';
     let iterations = 0;
-    const tools = getToolDefinitions(this.sessionData!.config.allowedTools);
+    const customTools = getToolDefinitions(this.sessionData!.config.allowedTools);
+    const useWebSearch = hasWebSearchTool(this.sessionData!.config.allowedTools);
+    const model = this.sessionData!.config.model || 'claude-sonnet-4-20250514';
+
+    // Build combined tools array
+    const allTools: Anthropic.Tool[] = [
+      ...(customTools as Anthropic.Tool[]),
+      ...(useWebSearch ? [{
+        type: 'web_search_20250305' as const,
+        name: 'web_search',
+        max_uses: 10,
+      }] : []),
+    ];
+
+    // Get sandbox DO for tool execution if available
+    let sandboxDO: DurableObjectStub | undefined;
+    if (this.env.SANDBOX_DO) {
+      const sandboxId = this.env.SANDBOX_DO.idFromName(this.sessionData!.id);
+      sandboxDO = this.env.SANDBOX_DO.get(sandboxId);
+    }
 
     while (iterations < this.sessionData!.config.maxTurns) {
       iterations++;
 
-      // Build messages for API - cast to Anthropic's expected types
+      // Build messages for API
       const apiMessages = this.sessionData!.messages.map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content as MessageParam['content'],
       })) as MessageParam[];
 
       const response = await this.anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model,
         max_tokens: 4096,
         system: this.sessionData!.config.systemPrompt,
         messages: apiMessages,
-        tools: tools.length > 0 ? (tools as Anthropic.Tool[]) : undefined,
+        tools: allTools.length > 0 ? allTools : undefined,
+        temperature: this.sessionData!.config.temperature,
       });
 
       this.sessionData!.usage.inputTokens += response.usage.input_tokens;
@@ -379,6 +467,39 @@ export class AgentSession {
             name: block.name,
             input: block.input,
           });
+        } else if (block.type === 'server_tool_use') {
+          // Server tool (web_search) - executed by Anthropic's servers
+          const serverBlock = block as { type: 'server_tool_use'; id: string; name: string; input: unknown };
+          outputMessages.push({
+            type: 'tool_use',
+            toolName: serverBlock.name,
+            toolInput: serverBlock.input,
+            toolUseId: serverBlock.id,
+          });
+          contentBlocks.push({
+            type: 'server_tool_use',
+            id: serverBlock.id,
+            name: serverBlock.name,
+            input: serverBlock.input,
+          } as ContentBlock);
+        } else if (block.type === 'web_search_tool_result') {
+          // Server tool result
+          const resultBlock = block as { type: 'web_search_tool_result'; tool_use_id: string; content: unknown };
+          const resultContent = typeof resultBlock.content === 'string'
+            ? resultBlock.content
+            : JSON.stringify(resultBlock.content, null, 2);
+          outputMessages.push({
+            type: 'tool_result',
+            toolUseId: resultBlock.tool_use_id,
+            toolName: 'web_search',
+            toolResult: resultContent,
+            content: resultContent,
+          });
+          contentBlocks.push({
+            type: 'web_search_tool_result',
+            tool_use_id: resultBlock.tool_use_id,
+            content: resultBlock.content,
+          } as ContentBlock);
         }
       }
 
@@ -401,6 +522,7 @@ export class AgentSession {
                   sessionId: this.sessionData!.id,
                   env: this.env,
                   fileStorage: this.env.FILE_STORAGE,
+                  sandboxDO,
                 }
               );
 
@@ -464,8 +586,9 @@ export class AgentSession {
           if (request.method !== 'POST') {
             return new Response('Method not allowed', { status: 405 });
           }
-          const initConfig = (await request.json()) as Partial<SessionConfig>;
-          const state = await this.initialize(initConfig);
+          const initBody = (await request.json()) as Partial<SessionConfig> & { sessionId?: string };
+          const { sessionId: initSessionId, ...initConfig } = initBody;
+          const state = await this.initialize(initConfig, initSessionId);
           return Response.json(state);
 
         case '/state':
